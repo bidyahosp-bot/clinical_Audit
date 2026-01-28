@@ -1,0 +1,11 @@
+body { font-family: Arial, sans-serif; margin: 20px; background: #f4f6f9; }
+h1 { text-align: center; }
+.year-btn { margin: 10px; padding: 15px; background: #0077b6; color: white; border: none; cursor: pointer; }
+.year-section { display: none; margin-top: 20px; }
+table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+th, td { border: 1px solid #ccc; padding: 8px; text-align: center; vertical-align: top; }
+th { background: #0077b6; color: white; }
+.note { border-bottom: 1px solid #ccc; padding: 5px; }
+input { margin: 3px; padding: 5px; }
+button { margin: 5px; padding: 8px; background: #0077b6; color: white; border: none; cursor: pointer; }
+.form-section { margin-top: 15px; padding: 10px; background: #e9ecef; }
