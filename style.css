@@ -9,3 +9,6 @@ th { background: #0077b6; color: white; }
 input { margin: 3px; padding: 5px; }
 button { margin: 5px; padding: 8px; background: #0077b6; color: white; border: none; cursor: pointer; }
 .form-section { margin-top: 15px; padding: 10px; background: #e9ecef; }
+.year-buttons{ text-align:center; }
+.reaudit-list{ margin:0; padding-left:18px; text-align:left; }
+.notes{ text-align:left; }
