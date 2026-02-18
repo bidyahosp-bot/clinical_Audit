@@ -1,98 +1,61 @@
 <!DOCTYPE html>
 <html lang="en">
-
-  <head>
-    <meta charset="UTF-8">
-    <title>Untitled</title>
-    <link rel="stylesheet" href="./style.css">
-
-  </head>
-    
-  <body>
-  <!DOCTYPE html>
-<html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Bidiyah Hospital Clinical Audit</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 
   <h1>Bidiyah Hospital Clinical Audit</h1>
 
-  <!-- أزرار السنوات -->
-  <button class="year-btn" onclick="showYear('2024')">2024</button>
-  <button class="year-btn" onclick="showYear('2025')">2025</button>
-  <button class="year-btn" onclick="showYear('2026')">2026</button>
+  <!-- Year Buttons -->
+  <div class="year-buttons">
+    <button class="year-btn" data-year="2024">2024</button>
+    <button class="year-btn" data-year="2025">2025</button>
+    <button class="year-btn" data-year="2026">2026</button>
+  </div>
 
-  <!-- قسم سنة 2024 -->
+  <!-- 2024 -->
   <div id="2024" class="year-section">
     <h2>Clinical Audits - 2024</h2>
     <div class="form-section">
       <h3>Add Clinical Audit</h3>
-      <input type="text" id="auditName2024" placeholder="Clinical Audit Name">
-      <input type="date" id="startDate2024">
-      <input type="date" id="reAuditDate2024" placeholder="Optional Re-Audit Date">
-      <button onclick="addAudit('2024')">Save Audit</button>
+      <input type="text" id="auditName2024" placeholder="Clinical Audit Name" />
+      <input type="date" id="startDate2024" />
+      <input type="date" id="reAuditDate2024" placeholder="Optional Re-Audit Date" />
+      <button class="btn-save-audit" data-year="2024">Save Audit</button>
     </div>
-    <table id="table2024">
-      <tr>
-        <th>Clinical Audit Name</th>
-        <th>Start Date</th>
-        <th>Re-Audit History</th>
-        <th>Notes</th>
-        <th>Actions</th>
-      </tr>
-    </table>
+    <table id="table2024"></table>
   </div>
 
-  <!-- قسم سنة 2025 -->
+  <!-- 2025 -->
   <div id="2025" class="year-section">
     <h2>Clinical Audits - 2025</h2>
     <div class="form-section">
       <h3>Add Clinical Audit</h3>
-      <input type="text" id="auditName2025" placeholder="Clinical Audit Name">
-      <input type="date" id="startDate2025">
-      <input type="date" id="reAuditDate2025" placeholder="Optional Re-Audit Date">
-      <button onclick="addAudit('2025')">Save Audit</button>
+      <input type="text" id="auditName2025" placeholder="Clinical Audit Name" />
+      <input type="date" id="startDate2025" />
+      <input type="date" id="reAuditDate2025" placeholder="Optional Re-Audit Date" />
+      <button class="btn-save-audit" data-year="2025">Save Audit</button>
     </div>
-    <table id="table2025">
-      <tr>
-        <th>Clinical Audit Name</th>
-        <th>Start Date</th>
-        <th>Re-Audit History</th>
-        <th>Notes</th>
-        <th>Actions</th>
-      </tr>
-    </table>
+    <table id="table2025"></table>
   </div>
 
-  <!-- قسم سنة 2026 -->
+  <!-- 2026 -->
   <div id="2026" class="year-section">
     <h2>Clinical Audits - 2026</h2>
     <div class="form-section">
       <h3>Add Clinical Audit</h3>
-      <input type="text" id="auditName2026" placeholder="Clinical Audit Name">
-      <input type="date" id="startDate2026">
-      <input type="date" id="reAuditDate2026" placeholder="Optional Re-Audit Date">
-      <button onclick="addAudit('2026')">Save Audit</button>
+      <input type="text" id="auditName2026" placeholder="Clinical Audit Name" />
+      <input type="date" id="startDate2026" />
+      <input type="date" id="reAuditDate2026" placeholder="Optional Re-Audit Date" />
+      <button class="btn-save-audit" data-year="2026">Save Audit</button>
     </div>
-    <table id="table2026">
-      <tr>
-        <th>Clinical Audit Name</th>
-        <th>Start Date</th>
-        <th>Re-Audit History</th>
-        <th>Notes</th>
-        <th>Actions</th>
-      </tr>
-    </table>
+    <table id="table2026"></table>
   </div>
 
   <script src="script.js"></script>
 </body>
-</html>
-    <script  src="./script.js"></script>
-
-  </body>
-  
 </html>
