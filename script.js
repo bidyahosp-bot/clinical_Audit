@@ -1,152 +1,332 @@
-function showYear(year) {
-  document.querySelectorAll('.year-section').forEach(div => div.style.display = 'none');
-  document.getElementById(year).style.display = 'block';
+// Bidiyah Hospital Clinical Audit
+// Data is saved in localStorage so it remains after refresh.
+
+const YEARS = ["2024", "2025", "2026"];
+
+function storageKey(year) {
+  return `audits_${year}`;
 }
 
-// إظهار قسم افتراضي عند تحميل الصفحة
-window.onload = function() {
-  showYear('2024'); // يمكنك تغييره إلى '2026' إذا أردت أحدث سنة
-};
+function safeParse(json, fallback) {
+  try {
+    const v = JSON.parse(json);
+    return v ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function getAudits(year) {
+  return safeParse(localStorage.getItem(storageKey(year)), []);
+}
+
+function setAudits(year, audits) {
+  localStorage.setItem(storageKey(year), JSON.stringify(audits));
+}
+
+function makeId() {
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function fmtMonthYear(isoDate) {
+  // isoDate: YYYY-MM-DD
+  if (!isoDate) return "";
+  const d = new Date(isoDate);
+  if (Number.isNaN(d.getTime())) return "";
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${month}/${year}`;
+}
+
+function showYear(year) {
+  document.querySelectorAll(".year-section").forEach((div) => {
+    div.style.display = "none";
+  });
+  const section = document.getElementById(year);
+  if (section) section.style.display = "block";
+}
+
+function tableHeaderHTML() {
+  return `
+    <tr>
+      <th>Clinical Audit Name</th>
+      <th>Start Date</th>
+      <th>Re-Audit History</th>
+      <th>Notes</th>
+      <th>Actions</th>
+    </tr>
+  `;
+}
+
+function renderYear(year) {
+  const table = document.getElementById("table" + year);
+  if (!table) return;
+
+  table.innerHTML = tableHeaderHTML();
+
+  const audits = getAudits(year);
+
+  audits.forEach((audit) => {
+    const tr = document.createElement("tr");
+    tr.dataset.id = audit.id;
+    tr.dataset.year = year;
+
+    // 1) Name
+    const tdName = document.createElement("td");
+    tdName.textContent = audit.name || "";
+    tr.appendChild(tdName);
+
+    // 2) Start Date (MM/YYYY)
+    const tdStart = document.createElement("td");
+    tdStart.textContent = fmtMonthYear(audit.startISO);
+    tr.appendChild(tdStart);
+
+    // 3) Re-audit
+    const tdRe = document.createElement("td");
+
+    const ul = document.createElement("ul");
+    ul.className = "reaudit-list";
+    (audit.reaudits || []).forEach((r) => {
+      const li = document.createElement("li");
+      li.textContent = fmtMonthYear(r.iso);
+      ul.appendChild(li);
+    });
+    tdRe.appendChild(ul);
+
+    const reInput = document.createElement("input");
+    reInput.type = "date";
+    reInput.className = "reaudit-input";
+    reInput.dataset.id = audit.id;
+    reInput.dataset.year = year;
+    tdRe.appendChild(reInput);
+
+    const reBtn = document.createElement("button");
+    reBtn.type = "button";
+    reBtn.className = "btn-add-reaudit";
+    reBtn.dataset.id = audit.id;
+    reBtn.dataset.year = year;
+    reBtn.textContent = "Add Re-Audit";
+    tdRe.appendChild(reBtn);
+
+    tr.appendChild(tdRe);
+
+    // 4) Notes
+    const tdNotes = document.createElement("td");
+
+    const notesDiv = document.createElement("div");
+    notesDiv.className = "notes";
+    (audit.notes || []).forEach((n) => {
+      const div = document.createElement("div");
+      div.className = "note";
+      div.innerHTML = `<strong>${escapeHtml(n.user || "")}</strong> (${fmtMonthYear(n.iso || "")}): ${escapeHtml(n.text || "")}`;
+      notesDiv.appendChild(div);
+    });
+    tdNotes.appendChild(notesDiv);
+
+    const noteInput = document.createElement("input");
+    noteInput.placeholder = "Add note...";
+    noteInput.className = "note-text";
+    noteInput.dataset.id = audit.id;
+    noteInput.dataset.year = year;
+    tdNotes.appendChild(noteInput);
+
+    const userInput = document.createElement("input");
+    userInput.placeholder = "Your name...";
+    userInput.className = "note-user";
+    userInput.dataset.id = audit.id;
+    userInput.dataset.year = year;
+    tdNotes.appendChild(userInput);
+
+    const noteBtn = document.createElement("button");
+    noteBtn.type = "button";
+    noteBtn.className = "btn-add-note";
+    noteBtn.dataset.id = audit.id;
+    noteBtn.dataset.year = year;
+    noteBtn.textContent = "Add Note";
+    tdNotes.appendChild(noteBtn);
+
+    tr.appendChild(tdNotes);
+
+    // 5) Actions
+    const tdActions = document.createElement("td");
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn-edit";
+    editBtn.dataset.id = audit.id;
+    editBtn.dataset.year = year;
+    editBtn.textContent = "Edit";
+    tdActions.appendChild(editBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "btn-delete";
+    delBtn.dataset.id = audit.id;
+    delBtn.dataset.year = year;
+    delBtn.textContent = "Delete";
+    tdActions.appendChild(delBtn);
+
+    tr.appendChild(tdActions);
+
+    table.appendChild(tr);
+  });
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
 function addAudit(year) {
-  const name = document.getElementById('auditName' + year).value;
-  const start = document.getElementById('startDate' + year).value;
-  const reAudit = document.getElementById('reAuditDate' + year).value;
+  const nameEl = document.getElementById("auditName" + year);
+  const startEl = document.getElementById("startDate" + year);
+  const reEl = document.getElementById("reAuditDate" + year);
 
-  if (name && start) {
-    const table = document.getElementById('table' + year);
-    const row = table.insertRow(-1);
+  const name = (nameEl?.value || "").trim();
+  const startISO = startEl?.value || "";
+  const reISO = reEl?.value || "";
 
-    row.insertCell(0).innerText = name;
-
-    // عرض تاريخ البداية بصيغة شهر/سنة فقط
-    const startDate = new Date(start);
-    const startMonth = ("0" + (startDate.getMonth() + 1)).slice(-2);
-    const startYear = startDate.getFullYear();
-    row.insertCell(1).innerText = startMonth + "/" + startYear;
-
-    // خانة Re-Audit History (اختيارية)
-    const reAuditCell = row.insertCell(2);
-    const reAuditList = document.createElement('ul');
-    reAuditList.id = 'reaudit-' + year + '-' + table.rows.length;
-    if (reAudit) {
-      const reAuditDate = new Date(reAudit);
-      const reAuditMonth = ("0" + (reAuditDate.getMonth() + 1)).slice(-2);
-      const reAuditYear = reAuditDate.getFullYear();
-      const firstItem = document.createElement('li');
-      firstItem.innerText = reAuditMonth + "/" + reAuditYear;
-      reAuditList.appendChild(firstItem);
-    }
-    reAuditCell.appendChild(reAuditList);
-
-    const newReAuditInput = document.createElement('input');
-    newReAuditInput.type = 'date';
-    newReAuditInput.id = 'newReAudit-' + year + '-' + table.rows.length;
-    reAuditCell.appendChild(newReAuditInput);
-
-    const btnReAudit = document.createElement('button');
-    btnReAudit.innerText = "Add Re-Audit";
-    btnReAudit.onclick = function() {
-      addReAudit(year + '-' + table.rows.length);
-    };
-    reAuditCell.appendChild(btnReAudit);
-
-    // خانة الملاحظات
-    const notesCell = row.insertCell(3);
-    const notesDiv = document.createElement('div');
-    notesDiv.id = 'notes-' + year + '-' + table.rows.length;
-    notesCell.appendChild(notesDiv);
-
-    const noteInput = document.createElement('input');
-    noteInput.placeholder = "Add note...";
-    noteInput.id = 'noteText-' + year + '-' + table.rows.length;
-    notesCell.appendChild(noteInput);
-
-    const userInput = document.createElement('input');
-    userInput.placeholder = "Your name...";
-    userInput.id = 'userName-' + year + '-' + table.rows.length;
-    notesCell.appendChild(userInput);
-
-    const btn = document.createElement('button');
-    btn.innerText = "Add Note";
-    btn.onclick = function() {
-      addNote(year + '-' + table.rows.length);
-    };
-    notesCell.appendChild(btn);
-
-    // خانة الإجراءات
-    const actionsCell = row.insertCell(4);
-    const editBtn = document.createElement('button');
-    editBtn.innerText = "Edit";
-    editBtn.onclick = function() {
-      editAudit(row);
-    };
-    actionsCell.appendChild(editBtn);
-
-    const deleteBtn = document.createElement('button');
-    deleteBtn.innerText = "Delete";
-    deleteBtn.onclick = function() {
-      table.deleteRow(row.rowIndex);
-    };
-    actionsCell.appendChild(deleteBtn);
-
-    document.getElementById('auditName' + year).value = '';
-    document.getElementById('startDate' + year).value = '';
-    document.getElementById('reAuditDate' + year).value = '';
-  } else {
+  if (!name || !startISO) {
     alert("Please enter Clinical Audit Name and Start Date.");
+    return;
   }
+
+  const audits = getAudits(year);
+  const newAudit = {
+    id: makeId(),
+    name,
+    startISO,
+    reaudits: [],
+    notes: [],
+  };
+
+  if (reISO) {
+    newAudit.reaudits.push({ iso: reISO });
+  }
+
+  audits.push(newAudit);
+  setAudits(year, audits);
+
+  // Clear inputs
+  if (nameEl) nameEl.value = "";
+  if (startEl) startEl.value = "";
+  if (reEl) reEl.value = "";
+
+  renderYear(year);
 }
 
-function addReAudit(id) {
-  const newDate = document.getElementById('newReAudit-' + id).value;
-  if (newDate) {
-    const list = document.getElementById('reaudit-' + id);
-    const reAuditDate = new Date(newDate);
-    const reAuditMonth = ("0" + (reAuditDate.getMonth() + 1)).slice(-2);
-    const reAuditYear = reAuditDate.getFullYear();
-    const item = document.createElement('li');
-    item.innerText = reAuditMonth + "/" + reAuditYear;
-    list.appendChild(item);
-    document.getElementById('newReAudit-' + id).value = '';
-  } else {
+function addReAudit(year, id) {
+  const audits = getAudits(year);
+  const audit = audits.find((a) => a.id === id);
+  if (!audit) return;
+
+  const input = document.querySelector(`.reaudit-input[data-year="${year}"][data-id="${id}"]`);
+  const iso = input?.value || "";
+  if (!iso) {
     alert("Please select a date.");
+    return;
   }
+
+  audit.reaudits = audit.reaudits || [];
+  audit.reaudits.push({ iso });
+
+  setAudits(year, audits);
+  renderYear(year);
 }
 
-function addNote(id) {
-  const noteText = document.getElementById('noteText-' + id).value;
-  const userName = document.getElementById('userName-' + id).value;
-  if (noteText && userName) {
-    const noteDiv = document.getElementById('notes-' + id);
-    const now = new Date();
-    const month = ("0" + (now.getMonth() + 1)).slice(-2);
-    const year = now.getFullYear();
-    const formattedDate = month + "/" + year;
+function addNote(year, id) {
+  const audits = getAudits(year);
+  const audit = audits.find((a) => a.id === id);
+  if (!audit) return;
 
-    const note = document.createElement('div');
-    note.className = 'note';
-    note.innerHTML = `<strong>${userName}</strong> (${formattedDate}): ${noteText}`;
-    noteDiv.appendChild(note);
+  const noteInput = document.querySelector(`.note-text[data-year="${year}"][data-id="${id}"]`);
+  const userInput = document.querySelector(`.note-user[data-year="${year}"][data-id="${id}"]`);
+  const text = (noteInput?.value || "").trim();
+  const user = (userInput?.value || "").trim();
 
-    document.getElementById('noteText-' + id).value = '';
-    document.getElementById('userName-' + id).value = '';
-  } else {
+  if (!text || !user) {
     alert("Please enter both note and your name.");
+    return;
   }
+
+  const now = new Date();
+  // store an ISO date (YYYY-MM-DD) for month/year display
+  const iso = now.toISOString().slice(0, 10);
+
+  audit.notes = audit.notes || [];
+  audit.notes.push({ user, text, iso });
+
+  setAudits(year, audits);
+  renderYear(year);
 }
 
-function editAudit(row) {
-  const name = prompt("Edit Clinical Audit Name:", row.cells[0].innerText);
-  const start = prompt("Edit Start Date (YYYY-MM):", "");
+function editAudit(year, id) {
+  const audits = getAudits(year);
+  const audit = audits.find((a) => a.id === id);
+  if (!audit) return;
 
-  if (name && start) {
-    row.cells[0].innerText = name;
+  const newName = prompt("Edit Clinical Audit Name:", audit.name || "");
+  if (newName === null) return; // cancelled
+  const name = newName.trim();
 
-    // تحويل المدخل إلى شهر/سنة فقط
-    const startDate = new Date(start + "-01");
-    const startMonth = ("0" + (startDate.getMonth() + 1)).slice(-2);
-    const startYear = startDate.getFullYear();
-    row.cells[1].innerText = startMonth + "/" + startYear;
+  const currentYYYYMM = (audit.startISO || "").slice(0, 7); // YYYY-MM
+  const newStart = prompt("Edit Start Date (YYYY-MM):", currentYYYYMM);
+  if (newStart === null) return; // cancelled
+  const startYYYYMM = newStart.trim();
+
+  if (!name || !/^\d{4}-\d{2}$/.test(startYYYYMM)) {
+    alert("Please enter a valid name and date like 2026-02.");
+    return;
   }
+
+  audit.name = name;
+  audit.startISO = startYYYYMM + "-01";
+
+  setAudits(year, audits);
+  renderYear(year);
 }
+
+function deleteAudit(year, id) {
+  const audits = getAudits(year);
+  const filtered = audits.filter((a) => a.id !== id);
+  setAudits(year, filtered);
+  renderYear(year);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  // Year buttons
+  document.querySelectorAll(".year-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      showYear(btn.dataset.year);
+    });
+  });
+
+  // Save Audit buttons
+  document.querySelectorAll(".btn-save-audit").forEach((btn) => {
+    btn.addEventListener("click", () => addAudit(btn.dataset.year));
+  });
+
+  // Event delegation for dynamic buttons
+  document.addEventListener("click", (e) => {
+    const target = e.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    if (target.classList.contains("btn-add-reaudit")) {
+      addReAudit(target.dataset.year, target.dataset.id);
+    } else if (target.classList.contains("btn-add-note")) {
+      addNote(target.dataset.year, target.dataset.id);
+    } else if (target.classList.contains("btn-edit")) {
+      editAudit(target.dataset.year, target.dataset.id);
+    } else if (target.classList.contains("btn-delete")) {
+      deleteAudit(target.dataset.year, target.dataset.id);
+    }
+  });
+
+  // Initial render
+  YEARS.forEach((y) => renderYear(y));
+  showYear("2024");
+});
