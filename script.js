@@ -8,7 +8,7 @@
 // ------------------------------------------------------------
 
 // Paste your deployed Apps Script Web App URL here (ends with /exec)
-const APP_SCRIPT_URL = ""https://script.google.com/macros/s/AKfycbyWCwCgqTcaYKXjzAqtJ9mjLRQKEZRk4fEMxoN3ulYdutPCvYzFbki3ZNKBY69aJZjy/exec";
+const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyWCwCgqTcaYKXjzAqtJ9mjLRQKEZRk4fEMxoN3ulYdutPCvYzFbki3ZNKBY69aJZjy/exec";
 
 const STORAGE_KEY_ALL = "audits_all_v2";
 
@@ -98,7 +98,9 @@ function getYearList(items) {
   (items || []).forEach((it) => {
     if (it && it.year) s.add(String(it.year));
   });
-  return Array.from(s).sort();
+
+  // Sort DESC so newest year appears first
+  return Array.from(s).sort((a, b) => Number(b) - Number(a));
 }
 
 function computeStats(items) {
@@ -125,7 +127,7 @@ function computeYearStats(items) {
     row.reaudits += (it.reaudits || []).length;
     row.notes += (it.notes || []).length;
   });
-  return Array.from(map.values()).sort((a, b) => a.year.localeCompare(b.year));
+  return Array.from(map.values()).sort((a, b) => b.year.localeCompare(a.year));
 }
 
 function setActiveCard(year) {
@@ -194,11 +196,18 @@ function renderYearSelect(items) {
   if (!sel) return;
 
   const years = getYearList(items);
-  sel.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join("");
 
-  // default to current filter or current year
+  sel.innerHTML =
+    `<option value="" selected disabled>Select Year</option>` +
+    years.map((y) => `<option value="${y}">${y}</option>`).join("");
+
+  // default to current filter or current year (if present)
   const nowYear = String(new Date().getFullYear());
-  sel.value = (STATE.filterYear && years.includes(STATE.filterYear)) ? STATE.filterYear : (years.includes(nowYear) ? nowYear : years[0]);
+  const preferred = (STATE.filterYear && years.includes(STATE.filterYear))
+    ? STATE.filterYear
+    : (years.includes(nowYear) ? nowYear : (years[0] || ""));
+
+  if (preferred) sel.value = preferred;
 }
 
 function tableHeaderHTML(mode) {
@@ -250,6 +259,14 @@ function renderTable() {
   table.innerHTML = tableHeaderHTML(mode);
 
   const items = getFilteredItems();
+
+  // Sort: newest year first, then newest start month
+  items.sort((a, b) => {
+    const ya = Number(a.year || 0);
+    const yb = Number(b.year || 0);
+    if (yb !== ya) return yb - ya;
+    return String(b.startYYYYMM || "").localeCompare(String(a.startYYYYMM || ""));
+  });
 
   items.forEach((audit) => {
     const tr = document.createElement("tr");
@@ -543,7 +560,7 @@ function renderAll() {
 
 document.addEventListener("DOMContentLoaded", () => {
   // Buttons
-  const btnSave = document.getElementById("btnSave");
+  const btnSave = document.getElementById("saveBtn");
   if (btnSave) btnSave.addEventListener("click", () => addAudit());
 
   const btnRefresh = document.getElementById("btnRefresh");
@@ -570,21 +587,3 @@ document.addEventListener("DOMContentLoaded", () => {
 
   refresh();
 });
-function exportToCSV() {
-    if (!allData || allData.length === 0) {
-        alert("No data to export");
-        return;
-    }
-
-    let csv = "Type,Department,Year,Start Month,Re-Audit Month,Notes\n";
-
-    allData.forEach(row => {
-        csv += `${row.type},${row.department},${row.year},${row.startMonth || ""},${row.reAuditMonth || ""},${row.notes || ""}\n`;
-    });
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = "Audit_Data.csv";
-    link.click();
-}
