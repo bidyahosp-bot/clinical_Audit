@@ -7,54 +7,71 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+ <div class="header">
+    <img src="logo.png" class="logo">
+    <h2>Audit Registration System</h2>
+</div>
+ <header class="topbar">
+    <h1>Bidiyah Hospital Clinical Audit</h1>
+    <nav class="topnav">
+      <a class="navlink active" href="index.html">Manage</a>
+      <a class="navlink" href="view.html">View & Statistics</a>
+    </nav>
+  </header>
 
-  <h1>Bidiyah Hospital Clinical Audit</h1>
+  <!-- Year Statistics Cards (click to filter) -->
+  <section class="cards" id="yearCards">
+    <!-- Filled by JS -->
+  </section>
 
-  <!-- Year Buttons -->
-  <div class="year-buttons">
-    <button class="year-btn" data-year="2024">2024</button>
-    <button class="year-btn" data-year="2025">2025</button>
-    <button class="year-btn" data-year="2026">2026</button>
-  </div>
+  <!-- Add Audit (Unified for all years) -->
+  <section class="panel">
+    <h2>Add Clinical Audit</h2>
 
-  <!-- 2024 -->
-  <div id="2024" class="year-section">
-    <h2>Clinical Audits - 2024</h2>
-    <div class="form-section">
-      <h3>Add Clinical Audit</h3>
-      <input type="text" id="auditName2024" placeholder="Clinical Audit Name" />
-      <input type="date" id="startDate2024" />
-      <input type="date" id="reAuditDate2024" placeholder="Optional Re-Audit Date" />
-      <button class="btn-save-audit" data-year="2024">Save Audit</button>
+    <div class="form-grid">
+      <div>
+        <label>Year</label>
+        <select id="yearSelect"></select>
+      </div>
+
+      <div>
+        <label>Clinical Audit Name</label>
+        <input type="text" id="auditName" placeholder="Clinical Audit Name" />
+      </div>
+
+      <div>
+        <label>Start Month (optional)</label>
+        <input type="month" id="startMonth" />
+      </div>
+
+      <div>
+        <label>Re-Audit Month (optional)</label>
+        <input type="month" id="reAuditMonth" />
+      </div>
+
+      <div class="form-actions">
+        <button class="btn" id="btnSave">Save Audit</button>
+      </div>
     </div>
-    <table id="table2024"></table>
-  </div>
 
-  <!-- 2025 -->
-  <div id="2025" class="year-section">
-    <h2>Clinical Audits - 2025</h2>
-    <div class="form-section">
-      <h3>Add Clinical Audit</h3>
-      <input type="text" id="auditName2025" placeholder="Clinical Audit Name" />
-      <input type="date" id="startDate2025" />
-      <input type="date" id="reAuditDate2025" placeholder="Optional Re-Audit Date" />
-      <button class="btn-save-audit" data-year="2025">Save Audit</button>
-    </div>
-    <table id="table2025"></table>
-  </div>
+    <p class="hint">Start Month is optional (you can skip it). Dates are stored as Month/Year only.</p>
+  </section>
 
-  <!-- 2026 -->
-  <div id="2026" class="year-section">
-    <h2>Clinical Audits - 2026</h2>
-    <div class="form-section">
-      <h3>Add Clinical Audit</h3>
-      <input type="text" id="auditName2026" placeholder="Clinical Audit Name" />
-      <input type="date" id="startDate2026" />
-      <input type="date" id="reAuditDate2026" placeholder="Optional Re-Audit Date" />
-      <button class="btn-save-audit" data-year="2026">Save Audit</button>
+  <!-- Table -->
+  <section class="panel">
+    <div class="table-head">
+      <h2 id="tableTitle">Audits</h2>
+      <div class="table-actions">
+        <button class="btn secondary" id="btnRefresh">Refresh</button>
+      </div>
     </div>
-    <table id="table2026"></table>
-  </div>
+
+    <div class="table-wrap">
+      <table id="auditsTable"></table>
+    </div>
+  </section>
+
+  <footer class="footer">PREPARED BY: JOUHARAH.IT</footer>
 
   <script src="script.js"></script>
 </body>
