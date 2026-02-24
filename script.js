@@ -1,11 +1,16 @@
 // Bidiyah Hospital Clinical Audit
-// Data is saved in localStorage so it remains after refresh.
+// ------------------------------------------------------------
+// IMPORTANT (Network / Shared data):
+// 1) If you want ONE unified table for all devices on the network,
+//    you need a shared backend (recommended: Google Sheets via Apps Script).
+// 2) If APP_SCRIPT_URL is empty, the app will fallback to localStorage
+//    (works on ONE device only).
+// ------------------------------------------------------------
 
-const YEARS = ["2024", "2025", "2026"];
+// Paste your deployed Apps Script Web App URL here (ends with /exec)
+const APP_SCRIPT_URL = ""https://script.google.com/macros/s/AKfycbyWCwCgqTcaYKXjzAqtJ9mjLRQKEZRk4fEMxoN3ulYdutPCvYzFbki3ZNKBY69aJZjy/exec";
 
-function storageKey(year) {
-  return `audits_${year}`;
-}
+const STORAGE_KEY_ALL = "audits_all_v2";
 
 function safeParse(json, fallback) {
   try {
@@ -16,160 +21,16 @@ function safeParse(json, fallback) {
   }
 }
 
-function getAudits(year) {
-  return safeParse(localStorage.getItem(storageKey(year)), []);
-}
-
-function setAudits(year, audits) {
-  localStorage.setItem(storageKey(year), JSON.stringify(audits));
-}
-
 function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function fmtMonthYear(isoDate) {
-  // isoDate: YYYY-MM-DD
-  if (!isoDate) return "";
-  const d = new Date(isoDate);
-  if (Number.isNaN(d.getTime())) return "";
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const year = d.getFullYear();
-  return `${month}/${year}`;
-}
-
-function showYear(year) {
-  document.querySelectorAll(".year-section").forEach((div) => {
-    div.style.display = "none";
-  });
-  const section = document.getElementById(year);
-  if (section) section.style.display = "block";
-}
-
-function tableHeaderHTML() {
-  return `
-    <tr>
-      <th>Clinical Audit Name</th>
-      <th>Start Date</th>
-      <th>Re-Audit History</th>
-      <th>Notes</th>
-      <th>Actions</th>
-    </tr>
-  `;
-}
-
-function renderYear(year) {
-  const table = document.getElementById("table" + year);
-  if (!table) return;
-
-  table.innerHTML = tableHeaderHTML();
-
-  const audits = getAudits(year);
-
-  audits.forEach((audit) => {
-    const tr = document.createElement("tr");
-    tr.dataset.id = audit.id;
-    tr.dataset.year = year;
-
-    // 1) Name
-    const tdName = document.createElement("td");
-    tdName.textContent = audit.name || "";
-    tr.appendChild(tdName);
-
-    // 2) Start Date (MM/YYYY)
-    const tdStart = document.createElement("td");
-    tdStart.textContent = fmtMonthYear(audit.startISO);
-    tr.appendChild(tdStart);
-
-    // 3) Re-audit
-    const tdRe = document.createElement("td");
-
-    const ul = document.createElement("ul");
-    ul.className = "reaudit-list";
-    (audit.reaudits || []).forEach((r) => {
-      const li = document.createElement("li");
-      li.textContent = fmtMonthYear(r.iso);
-      ul.appendChild(li);
-    });
-    tdRe.appendChild(ul);
-
-    const reInput = document.createElement("input");
-    reInput.type = "date";
-    reInput.className = "reaudit-input";
-    reInput.dataset.id = audit.id;
-    reInput.dataset.year = year;
-    tdRe.appendChild(reInput);
-
-    const reBtn = document.createElement("button");
-    reBtn.type = "button";
-    reBtn.className = "btn-add-reaudit";
-    reBtn.dataset.id = audit.id;
-    reBtn.dataset.year = year;
-    reBtn.textContent = "Add Re-Audit";
-    tdRe.appendChild(reBtn);
-
-    tr.appendChild(tdRe);
-
-    // 4) Notes
-    const tdNotes = document.createElement("td");
-
-    const notesDiv = document.createElement("div");
-    notesDiv.className = "notes";
-    (audit.notes || []).forEach((n) => {
-      const div = document.createElement("div");
-      div.className = "note";
-      div.innerHTML = `<strong>${escapeHtml(n.user || "")}</strong> (${fmtMonthYear(n.iso || "")}): ${escapeHtml(n.text || "")}`;
-      notesDiv.appendChild(div);
-    });
-    tdNotes.appendChild(notesDiv);
-
-    const noteInput = document.createElement("input");
-    noteInput.placeholder = "Add note...";
-    noteInput.className = "note-text";
-    noteInput.dataset.id = audit.id;
-    noteInput.dataset.year = year;
-    tdNotes.appendChild(noteInput);
-
-    const userInput = document.createElement("input");
-    userInput.placeholder = "Your name...";
-    userInput.className = "note-user";
-    userInput.dataset.id = audit.id;
-    userInput.dataset.year = year;
-    tdNotes.appendChild(userInput);
-
-    const noteBtn = document.createElement("button");
-    noteBtn.type = "button";
-    noteBtn.className = "btn-add-note";
-    noteBtn.dataset.id = audit.id;
-    noteBtn.dataset.year = year;
-    noteBtn.textContent = "Add Note";
-    tdNotes.appendChild(noteBtn);
-
-    tr.appendChild(tdNotes);
-
-    // 5) Actions
-    const tdActions = document.createElement("td");
-
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "btn-edit";
-    editBtn.dataset.id = audit.id;
-    editBtn.dataset.year = year;
-    editBtn.textContent = "Edit";
-    tdActions.appendChild(editBtn);
-
-    const delBtn = document.createElement("button");
-    delBtn.type = "button";
-    delBtn.className = "btn-delete";
-    delBtn.dataset.id = audit.id;
-    delBtn.dataset.year = year;
-    delBtn.textContent = "Delete";
-    tdActions.appendChild(delBtn);
-
-    tr.appendChild(tdActions);
-
-    table.appendChild(tr);
-  });
+function monthToLabel(yyyymm) {
+  // yyyymm: "YYYY-MM" or ""
+  if (!yyyymm) return "";
+  const m = yyyymm.split("-");
+  if (m.length !== 2) return "";
+  return `${m[1]}/${m[0]}`;
 }
 
 function escapeHtml(str) {
@@ -181,152 +42,549 @@ function escapeHtml(str) {
     .replaceAll("'", "&#039;");
 }
 
-function addAudit(year) {
-  const nameEl = document.getElementById("auditName" + year);
-  const startEl = document.getElementById("startDate" + year);
-  const reEl = document.getElementById("reAuditDate" + year);
+// -------------------- Data Layer --------------------
+
+async function apiRequest(action, payload) {
+  if (!APP_SCRIPT_URL) throw new Error("APP_SCRIPT_URL is not set");
+
+  const res = await fetch(APP_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, payload }),
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.ok !== true) {
+    const msg = (data && data.error) ? data.error : `Request failed (${res.status})`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function loadAllAudits() {
+  // Backend preferred
+  if (APP_SCRIPT_URL) {
+    const data = await apiRequest("list", {});
+    return Array.isArray(data.items) ? data.items : [];
+  }
+
+  // Fallback: localStorage (single-device)
+  return safeParse(localStorage.getItem(STORAGE_KEY_ALL), []);
+}
+
+async function saveAllAudits(items) {
+  if (APP_SCRIPT_URL) {
+    await apiRequest("replace_all", { items });
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY_ALL, JSON.stringify(items));
+}
+
+// -------------------- UI State --------------------
+
+let STATE = {
+  items: [],
+  filterYear: null, // string year or null
+};
+
+function getMode() {
+  return (window.APP_MODE || "manage").toLowerCase();
+}
+
+function getYearList(items) {
+  // Collect years from data + add current year and neighbors
+  const nowYear = new Date().getFullYear();
+  const s = new Set([String(nowYear - 1), String(nowYear), String(nowYear + 1)]);
+  (items || []).forEach((it) => {
+    if (it && it.year) s.add(String(it.year));
+  });
+  return Array.from(s).sort();
+}
+
+function computeStats(items) {
+  const out = {
+    totalAudits: items.length,
+    totalReaudits: 0,
+    totalNotes: 0,
+  };
+  items.forEach((it) => {
+    out.totalReaudits += (it.reaudits || []).length;
+    out.totalNotes += (it.notes || []).length;
+  });
+  return out;
+}
+
+function computeYearStats(items) {
+  const map = new Map();
+  items.forEach((it) => {
+    const y = String(it.year || "");
+    if (!y) return;
+    if (!map.has(y)) map.set(y, { year: y, audits: 0, reaudits: 0, notes: 0 });
+    const row = map.get(y);
+    row.audits += 1;
+    row.reaudits += (it.reaudits || []).length;
+    row.notes += (it.notes || []).length;
+  });
+  return Array.from(map.values()).sort((a, b) => a.year.localeCompare(b.year));
+}
+
+function setActiveCard(year) {
+  document.querySelectorAll(".card[data-year]").forEach((c) => {
+    c.classList.toggle("active", c.getAttribute("data-year") === String(year || ""));
+  });
+}
+
+function renderYearCards(items) {
+  const wrap = document.getElementById("yearCards");
+  if (!wrap) return;
+
+  const yearStats = computeYearStats(items);
+  const years = getYearList(items);
+
+  // Make sure every year exists even if 0
+  const byYear = new Map(yearStats.map((x) => [x.year, x]));
+  const normalized = years.map((y) => byYear.get(y) || ({ year: y, audits: 0, reaudits: 0, notes: 0 }));
+
+  wrap.innerHTML = "";
+
+  // "All" card
+  const all = document.createElement("div");
+  all.className = "card";
+  all.setAttribute("data-year", "");
+  const g = computeStats(items);
+  all.innerHTML = `
+    <div class="title">All Years</div>
+    <div class="big">${g.totalAudits}</div>
+    <div class="sub">Re-audits: ${g.totalReaudits} • Notes: ${g.totalNotes}</div>
+  `;
+  all.addEventListener("click", () => {
+    STATE.filterYear = null;
+    setActiveCard("");
+    renderTable();
+    renderHeaderTitles();
+    renderGlobalStats();
+  });
+  wrap.appendChild(all);
+
+  normalized.forEach((s) => {
+    const card = document.createElement("div");
+    card.className = "card";
+    card.setAttribute("data-year", s.year);
+    card.innerHTML = `
+      <div class="title">${escapeHtml(s.year)}</div>
+      <div class="big">${s.audits}</div>
+      <div class="sub">Re-audits: ${s.reaudits} • Notes: ${s.notes}</div>
+    `;
+    card.addEventListener("click", () => {
+      STATE.filterYear = s.year;
+      setActiveCard(s.year);
+      renderTable();
+      renderHeaderTitles();
+      renderGlobalStats();
+    });
+    wrap.appendChild(card);
+  });
+
+  // default active
+  setActiveCard(STATE.filterYear || "");
+}
+
+function renderYearSelect(items) {
+  const sel = document.getElementById("yearSelect");
+  if (!sel) return;
+
+  const years = getYearList(items);
+  sel.innerHTML = years.map((y) => `<option value="${y}">${y}</option>`).join("");
+
+  // default to current filter or current year
+  const nowYear = String(new Date().getFullYear());
+  sel.value = (STATE.filterYear && years.includes(STATE.filterYear)) ? STATE.filterYear : (years.includes(nowYear) ? nowYear : years[0]);
+}
+
+function tableHeaderHTML(mode) {
+  const isView = mode === "view";
+  return `
+    <tr>
+      <th>Year</th>
+      <th>Clinical Audit Name</th>
+      <th>Start (MM/YYYY)</th>
+      <th>Re-Audit History</th>
+      <th>Notes</th>
+      <th>${isView ? "" : "Actions"}</th>
+    </tr>
+  `;
+}
+
+function getFilteredItems() {
+  if (!STATE.filterYear) return STATE.items;
+  return STATE.items.filter((it) => String(it.year) === String(STATE.filterYear));
+}
+
+function renderHeaderTitles() {
+  const title = document.getElementById("tableTitle");
+  if (!title) return;
+  title.textContent = STATE.filterYear ? `Audits - ${STATE.filterYear}` : "All Audits";
+}
+
+function renderGlobalStats() {
+  const box = document.getElementById("globalStats");
+  if (!box) return;
+
+  const items = getFilteredItems();
+  const s = computeStats(items);
+
+  box.innerHTML = `
+    <div class="statbox"><div class="k">Total Audits</div><div class="v">${s.totalAudits}</div></div>
+    <div class="statbox"><div class="k">Total Re-Audits</div><div class="v">${s.totalReaudits}</div></div>
+    <div class="statbox"><div class="k">Total Notes</div><div class="v">${s.totalNotes}</div></div>
+  `;
+}
+
+function renderTable() {
+  const table = document.getElementById("auditsTable");
+  if (!table) return;
+
+  const mode = getMode();
+  const isView = mode === "view";
+
+  table.innerHTML = tableHeaderHTML(mode);
+
+  const items = getFilteredItems();
+
+  items.forEach((audit) => {
+    const tr = document.createElement("tr");
+    tr.dataset.id = audit.id;
+
+    // Year
+    const tdYear = document.createElement("td");
+    tdYear.textContent = audit.year || "";
+    tr.appendChild(tdYear);
+
+    // Name
+    const tdName = document.createElement("td");
+    tdName.textContent = audit.name || "";
+    tr.appendChild(tdName);
+
+    // Start month
+    const tdStart = document.createElement("td");
+    tdStart.textContent = monthToLabel(audit.startYYYYMM || "") || "-";
+    tr.appendChild(tdStart);
+
+    // Re-audit
+    const tdRe = document.createElement("td");
+
+    const ul = document.createElement("ul");
+    ul.className = "reaudit-list";
+    (audit.reaudits || []).forEach((r) => {
+      const li = document.createElement("li");
+      li.textContent = monthToLabel(r.yyyymm || "");
+      ul.appendChild(li);
+    });
+    tdRe.appendChild(ul);
+
+    if (!isView) {
+      const ctrls = document.createElement("div");
+      ctrls.className = "inline-controls";
+
+      const reInput = document.createElement("input");
+      reInput.type = "month";
+      reInput.className = "reaudit-input";
+      reInput.dataset.id = audit.id;
+      ctrls.appendChild(reInput);
+
+      const reBtn = document.createElement("button");
+      reBtn.type = "button";
+      reBtn.className = "btn btn-add-reaudit";
+      reBtn.dataset.id = audit.id;
+      reBtn.textContent = "Add Re-Audit";
+      ctrls.appendChild(reBtn);
+
+      tdRe.appendChild(ctrls);
+    }
+
+    tr.appendChild(tdRe);
+
+    // Notes
+    const tdNotes = document.createElement("td");
+
+    const notesDiv = document.createElement("div");
+    notesDiv.className = "notes";
+    (audit.notes || []).forEach((n) => {
+      const div = document.createElement("div");
+      div.className = "note";
+      div.innerHTML = `<strong>${escapeHtml(n.user || "")}</strong> (${escapeHtml(monthToLabel(n.yyyymm || ""))}): ${escapeHtml(n.text || "")}`;
+      notesDiv.appendChild(div);
+    });
+    tdNotes.appendChild(notesDiv);
+
+    if (!isView) {
+      const ctrls = document.createElement("div");
+      ctrls.className = "inline-controls";
+
+      const noteText = document.createElement("input");
+      noteText.placeholder = "Add note...";
+      noteText.className = "note-text";
+      noteText.dataset.id = audit.id;
+      ctrls.appendChild(noteText);
+
+      const noteUser = document.createElement("input");
+      noteUser.placeholder = "Your name...";
+      noteUser.className = "note-user";
+      noteUser.dataset.id = audit.id;
+      ctrls.appendChild(noteUser);
+
+      const noteMonth = document.createElement("input");
+      noteMonth.type = "month";
+      noteMonth.className = "note-month";
+      noteMonth.dataset.id = audit.id;
+      // default to current month
+      const now = new Date();
+      noteMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      ctrls.appendChild(noteMonth);
+
+      const noteBtn = document.createElement("button");
+      noteBtn.type = "button";
+      noteBtn.className = "btn btn-add-note";
+      noteBtn.dataset.id = audit.id;
+      noteBtn.textContent = "Add Note";
+      ctrls.appendChild(noteBtn);
+
+      tdNotes.appendChild(ctrls);
+    }
+
+    tr.appendChild(tdNotes);
+
+    // Actions
+    const tdActions = document.createElement("td");
+    if (!isView) {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "btn btn-edit";
+      editBtn.dataset.id = audit.id;
+      editBtn.textContent = "Edit";
+      tdActions.appendChild(editBtn);
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "btn btn-delete";
+      delBtn.dataset.id = audit.id;
+      delBtn.textContent = "Delete";
+      tdActions.appendChild(delBtn);
+    } else {
+      tdActions.textContent = "";
+    }
+    tr.appendChild(tdActions);
+
+    table.appendChild(tr);
+  });
+}
+
+// -------------------- Mutations --------------------
+
+async function addAudit() {
+  const nameEl = document.getElementById("auditName");
+  const yearEl = document.getElementById("yearSelect");
+  const startEl = document.getElementById("startMonth");
+  const reEl = document.getElementById("reAuditMonth");
 
   const name = (nameEl?.value || "").trim();
-  const startISO = startEl?.value || "";
-  const reISO = reEl?.value || "";
+  const year = String(yearEl?.value || "").trim();
+  const startYYYYMM = (startEl?.value || "").trim(); // optional
+  const reYYYYMM = (reEl?.value || "").trim(); // optional
 
-  if (!name || !startISO) {
-    alert("Please enter Clinical Audit Name and Start Date.");
+  if (!name || !year) {
+    alert("Please enter Clinical Audit Name and Year.");
     return;
   }
 
-  const audits = getAudits(year);
   const newAudit = {
     id: makeId(),
+    year,
     name,
-    startISO,
+    startYYYYMM: startYYYYMM || "",
     reaudits: [],
     notes: [],
   };
 
-  if (reISO) {
-    newAudit.reaudits.push({ iso: reISO });
-  }
+  if (reYYYYMM) newAudit.reaudits.push({ yyyymm: reYYYYMM });
 
-  audits.push(newAudit);
-  setAudits(year, audits);
+  STATE.items.push(newAudit);
+  await saveAllAudits(STATE.items);
 
-  // Clear inputs
   if (nameEl) nameEl.value = "";
   if (startEl) startEl.value = "";
   if (reEl) reEl.value = "";
 
-  renderYear(year);
+  renderAll();
 }
 
-function addReAudit(year, id) {
-  const audits = getAudits(year);
-  const audit = audits.find((a) => a.id === id);
-  if (!audit) return;
-
-  const input = document.querySelector(`.reaudit-input[data-year="${year}"][data-id="${id}"]`);
-  const iso = input?.value || "";
-  if (!iso) {
-    alert("Please select a date.");
+async function addReAudit(id) {
+  const input = document.querySelector(`.reaudit-input[data-id="${id}"]`);
+  const yyyymm = (input?.value || "").trim();
+  if (!yyyymm) {
+    alert("Please select a month.");
     return;
   }
 
-  audit.reaudits = audit.reaudits || [];
-  audit.reaudits.push({ iso });
-
-  setAudits(year, audits);
-  renderYear(year);
-}
-
-function addNote(year, id) {
-  const audits = getAudits(year);
-  const audit = audits.find((a) => a.id === id);
+  const audit = STATE.items.find((a) => a.id === id);
   if (!audit) return;
 
-  const noteInput = document.querySelector(`.note-text[data-year="${year}"][data-id="${id}"]`);
-  const userInput = document.querySelector(`.note-user[data-year="${year}"][data-id="${id}"]`);
+  audit.reaudits = audit.reaudits || [];
+  audit.reaudits.push({ yyyymm });
+
+  await saveAllAudits(STATE.items);
+  renderAll();
+}
+
+async function addNote(id) {
+  const noteInput = document.querySelector(`.note-text[data-id="${id}"]`);
+  const userInput = document.querySelector(`.note-user[data-id="${id}"]`);
+  const monthInput = document.querySelector(`.note-month[data-id="${id}"]`);
+
   const text = (noteInput?.value || "").trim();
   const user = (userInput?.value || "").trim();
+  const yyyymm = (monthInput?.value || "").trim(); // month/year only
 
   if (!text || !user) {
     alert("Please enter both note and your name.");
     return;
   }
 
-  const now = new Date();
-  // store an ISO date (YYYY-MM-DD) for month/year display
-  const iso = now.toISOString().slice(0, 10);
-
-  audit.notes = audit.notes || [];
-  audit.notes.push({ user, text, iso });
-
-  setAudits(year, audits);
-  renderYear(year);
-}
-
-function editAudit(year, id) {
-  const audits = getAudits(year);
-  const audit = audits.find((a) => a.id === id);
+  const audit = STATE.items.find((a) => a.id === id);
   if (!audit) return;
 
+  audit.notes = audit.notes || [];
+  audit.notes.push({ user, text, yyyymm: yyyymm || "" });
+
+  await saveAllAudits(STATE.items);
+  renderAll();
+}
+
+async function editAudit(id) {
+  const audit = STATE.items.find((a) => a.id === id);
+  if (!audit) return;
+
+  const newYear = prompt("Edit Year (e.g. 2026):", String(audit.year || ""));
+  if (newYear === null) return;
+  const year = newYear.trim();
+
   const newName = prompt("Edit Clinical Audit Name:", audit.name || "");
-  if (newName === null) return; // cancelled
+  if (newName === null) return;
   const name = newName.trim();
 
-  const currentYYYYMM = (audit.startISO || "").slice(0, 7); // YYYY-MM
-  const newStart = prompt("Edit Start Date (YYYY-MM):", currentYYYYMM);
-  if (newStart === null) return; // cancelled
+  const newStart = prompt("Edit Start Month (YYYY-MM) - leave empty if none:", audit.startYYYYMM || "");
+  if (newStart === null) return;
   const startYYYYMM = newStart.trim();
 
-  if (!name || !/^\d{4}-\d{2}$/.test(startYYYYMM)) {
-    alert("Please enter a valid name and date like 2026-02.");
+  if (!year || !/^\d{4}$/.test(year) || !name) {
+    alert("Please enter a valid Year (YYYY) and Name.");
+    return;
+  }
+  if (startYYYYMM && !/^\d{4}-\d{2}$/.test(startYYYYMM)) {
+    alert("Start Month must be like YYYY-MM or empty.");
     return;
   }
 
+  audit.year = year;
   audit.name = name;
-  audit.startISO = startYYYYMM + "-01";
+  audit.startYYYYMM = startYYYYMM;
 
-  setAudits(year, audits);
-  renderYear(year);
+  await saveAllAudits(STATE.items);
+  renderAll();
 }
 
-function deleteAudit(year, id) {
-  const audits = getAudits(year);
-  const filtered = audits.filter((a) => a.id !== id);
-  setAudits(year, filtered);
-  renderYear(year);
+async function deleteAudit(id) {
+  if (!confirm("Delete this audit?")) return;
+  STATE.items = STATE.items.filter((a) => a.id !== id);
+  await saveAllAudits(STATE.items);
+  renderAll();
+}
+
+// -------------------- Export (View page) --------------------
+
+function exportJson() {
+  const items = getFilteredItems();
+  const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `clinical-audits-${STATE.filterYear || "all"}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// -------------------- Boot --------------------
+
+async function refresh() {
+  try {
+    const items = await loadAllAudits();
+    STATE.items = Array.isArray(items) ? items : [];
+
+    // If filterYear not present anymore, clear it
+    if (STATE.filterYear && !STATE.items.some((x) => String(x.year) === String(STATE.filterYear))) {
+      STATE.filterYear = null;
+    }
+
+    renderAll();
+  } catch (e) {
+    alert(`Load failed: ${e.message}`);
+  }
+}
+
+function renderAll() {
+  renderYearCards(STATE.items);
+  renderYearSelect(STATE.items);
+  renderHeaderTitles();
+  renderGlobalStats();
+  renderTable();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  // Year buttons
-  document.querySelectorAll(".year-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      showYear(btn.dataset.year);
-    });
-  });
+  // Buttons
+  const btnSave = document.getElementById("btnSave");
+  if (btnSave) btnSave.addEventListener("click", () => addAudit());
 
-  // Save Audit buttons
-  document.querySelectorAll(".btn-save-audit").forEach((btn) => {
-    btn.addEventListener("click", () => addAudit(btn.dataset.year));
-  });
+  const btnRefresh = document.getElementById("btnRefresh");
+  if (btnRefresh) btnRefresh.addEventListener("click", () => refresh());
 
-  // Event delegation for dynamic buttons
+  const btnExport = document.getElementById("btnExport");
+  if (btnExport) btnExport.addEventListener("click", () => exportJson());
+
+  // Delegation for dynamic buttons
   document.addEventListener("click", (e) => {
-    const target = e.target;
-    if (!(target instanceof HTMLElement)) return;
+    const t = e.target;
+    if (!(t instanceof HTMLElement)) return;
 
-    if (target.classList.contains("btn-add-reaudit")) {
-      addReAudit(target.dataset.year, target.dataset.id);
-    } else if (target.classList.contains("btn-add-note")) {
-      addNote(target.dataset.year, target.dataset.id);
-    } else if (target.classList.contains("btn-edit")) {
-      editAudit(target.dataset.year, target.dataset.id);
-    } else if (target.classList.contains("btn-delete")) {
-      deleteAudit(target.dataset.year, target.dataset.id);
+    if (t.classList.contains("btn-add-reaudit")) {
+      addReAudit(t.dataset.id);
+    } else if (t.classList.contains("btn-add-note")) {
+      addNote(t.dataset.id);
+    } else if (t.classList.contains("btn-edit")) {
+      editAudit(t.dataset.id);
+    } else if (t.classList.contains("btn-delete")) {
+      deleteAudit(t.dataset.id);
     }
   });
 
-  // Initial render
-  YEARS.forEach((y) => renderYear(y));
-  showYear("2024");
+  refresh();
 });
+function exportToCSV() {
+    if (!allData || allData.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    let csv = "Type,Department,Year,Start Month,Re-Audit Month,Notes\n";
+
+    allData.forEach(row => {
+        csv += `${row.type},${row.department},${row.year},${row.startMonth || ""},${row.reAuditMonth || ""},${row.notes || ""}\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "Audit_Data.csv";
+    link.click();
+}
