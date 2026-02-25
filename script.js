@@ -8,7 +8,7 @@
 // ------------------------------------------------------------
 
 // Paste your deployed Apps Script Web App URL here (ends with /exec)
-const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbySExFjvEh6CVsN7B4iRr2k5LPcfQWGkyi75DP67m0/dev";
+const APP_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzGAQjzxpUeMBjKAS3YL7GXyI8y7RVSCuUgVpQpW3KSOXJPLcCMk8HbEZ4fE3ZnhxRW/exec";
 
 const STORAGE_KEY_ALL = "audits_all_v2";
 
