@@ -95,17 +95,17 @@ function getMode() {
 }
 
 function getYearList(items) {
-  // Collect years from data + add current year and neighbors
   const nowYear = new Date().getFullYear();
-  const s = new Set([String(nowYear - 1), String(nowYear), String(nowYear + 1)]);
+
+  // أضفنا 2024 هنا يدويًا
+  const s = new Set(["2024", String(nowYear - 1), String(nowYear), String(nowYear + 1)]);
+
   (items || []).forEach((it) => {
     if (it && it.year) s.add(String(it.year));
   });
 
-  // Sort DESC so newest year appears first
   return Array.from(s).sort((a, b) => Number(b) - Number(a));
 }
-
 function computeStats(items) {
   const out = {
     totalAudits: items.length,
