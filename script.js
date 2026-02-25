@@ -49,11 +49,14 @@ async function apiRequest(action, payload) {
 
   const res = await fetch(APP_SCRIPT_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    // لا تضع Headers هنا حتى لا يحدث preflight (CORS)
     body: JSON.stringify({ action, payload }),
   });
 
-  const data = await res.json().catch(() => null);
+  const text = await res.text(); // نستقبل كنص أولًا
+  let data = null;
+  try { data = JSON.parse(text); } catch {}
+
   if (!res.ok || !data || data.ok !== true) {
     const msg = (data && data.error) ? data.error : `Request failed (${res.status})`;
     throw new Error(msg);
