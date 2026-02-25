@@ -98,7 +98,7 @@ function getYearList(items) {
   const nowYear = new Date().getFullYear();
 
   // أضفنا 2024 هنا يدويًا
-  const s = new Set(["2024", String(nowYear - 1), String(nowYear), String(nowYear + 1)]);
+  const s = new Set([String(nowYear - 2), String(nowYear - 1), String(nowYear), String(nowYear + 1)]);
 
   (items || []).forEach((it) => {
     if (it && it.year) s.add(String(it.year));
