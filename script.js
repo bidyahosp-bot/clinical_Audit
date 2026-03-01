@@ -239,6 +239,29 @@ function renderTable(items) {
 
     tr.appendChild(tdRe);
 
+
+    async function updateAuditOnServer(auditId, mutatorFn) {
+  // 1) get latest from sheet
+  const latest = await loadAllAudits();
+
+  // 2) find the audit
+  const idx = latest.findIndex((a) => String(a.id) === String(auditId));
+  if (idx === -1) throw new Error("Audit not found on server.");
+
+  // ensure arrays exist
+  latest[idx].reaudits = Array.isArray(latest[idx].reaudits) ? latest[idx].reaudits : [];
+  latest[idx].notes = Array.isArray(latest[idx].notes) ? latest[idx].notes : [];
+
+  // 3) apply change
+  mutatorFn(latest[idx]);
+
+  // 4) save back (replace_all)
+  await saveAllAudits(latest);
+
+  // 5) refresh state
+  STATE.items = latest;
+  renderAll();
+}
     // Notes
     const tdNotes = document.createElement("td");
 
@@ -454,58 +477,59 @@ async function addNote(id) {
 }
 
 async function editNote(id, idx) {
-  const audit = STATE.items.find((a) => a.id === id);
-  if (!audit) return;
+  try {
+    // خذي النص الحالي من النسخة الموجودة في الصفحة (قد تكون قديمة)
+    const auditLocal = STATE.items.find((a) => a.id === id);
+    const current = auditLocal?.notes?.[idx] || {};
 
-  audit.notes = audit.notes || [];
-  const note = audit.notes[idx];
-  if (!note) return;
+    const newText = prompt("Edit note text:", current.text || "");
+    if (newText === null) return;
 
-  const newText = prompt("Edit note text:", note.text || "");
-  if (newText === null) return;
+    const newUser = prompt("Edit note user/name:", current.user || "");
+    if (newUser === null) return;
 
-  const newUser = prompt("Edit note user/name:", note.user || "");
-  if (newUser === null) return;
+    const newMonth = prompt("Edit note month (YYYY-MM) - leave empty if none:", current.yyyymm || "");
+    if (newMonth === null) return;
 
-  const newMonth = prompt("Edit note month (YYYY-MM) - leave empty if none:", note.yyyymm || "");
-  if (newMonth === null) return;
+    const text = newText.trim();
+    const user = newUser.trim();
+    const yyyymm = newMonth.trim();
 
-  const text = newText.trim();
-  const user = newUser.trim();
-  const yyyymm = newMonth.trim();
+    if (!text || !user) {
+      alert("Note text and user cannot be empty.");
+      return;
+    }
+    if (yyyymm && !/^\d{4}-\d{2}$/.test(yyyymm)) {
+      alert("Month must be like YYYY-MM or empty.");
+      return;
+    }
 
-  if (!text || !user) {
-    alert("Note text and user cannot be empty.");
-    return;
+    await updateAuditOnServer(id, (audit) => {
+      audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
+      if (!audit.notes[idx]) throw new Error("Note not found on server.");
+      audit.notes[idx].text = text;
+      audit.notes[idx].user = user;
+      audit.notes[idx].yyyymm = yyyymm;
+    });
+
+  } catch (e) {
+    alert(`Edit failed: ${e.message || e}`);
   }
-  if (yyyymm && !/^\d{4}-\d{2}$/.test(yyyymm)) {
-    alert("Month must be like YYYY-MM or empty.");
-    return;
-  }
-
-  note.text = text;
-  note.user = user;
-  note.yyyymm = yyyymm;
-
-  await saveAllAudits(STATE.items);
-  renderAll();
 }
-
 async function deleteNote(id, idx) {
-  if (!confirm("Delete this note?")) return;
+  try {
+    if (!confirm("Delete this note?")) return;
 
-  const audit = STATE.items.find((a) => a.id === id);
-  if (!audit) return;
+    await updateAuditOnServer(id, (audit) => {
+      audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
+      if (idx < 0 || idx >= audit.notes.length) throw new Error("Note not found on server.");
+      audit.notes.splice(idx, 1);
+    });
 
-  audit.notes = audit.notes || [];
-  if (idx < 0 || idx >= audit.notes.length) return;
-
-  audit.notes.splice(idx, 1);
-
-  await saveAllAudits(STATE.items);
-  renderAll();
+  } catch (e) {
+    alert(`Delete failed: ${e.message || e}`);
+  }
 }
-
 async function editAudit(id) {
   const audit = STATE.items.find((a) => a.id === id);
   if (!audit) return;
