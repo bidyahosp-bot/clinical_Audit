@@ -11,7 +11,7 @@
 
 // Paste your deployed Apps Script Web App URL here (must end with /exec)
 const APP_SCRIPT_URL =
-  "https://script.google.com/macros/s/AKfycbyWCwCgqTcaYKXjzAqtJ9mjLRQKEZRk4fEMxoN3ulYdutPCvYzFbki3ZNKBY69aJZjy/exec";
+  "https://script.google.com/macros/s/AKfycbyvwGH45jfOgDUhGL5F7u7zB0moic3fBbH2tzQGuUvsViC5B68Y5v4ZsP4IHowIN8q4/exec";
 
 // Fallback single-device storage (only used if APP_SCRIPT_URL = "")
 const STORAGE_KEY = "clinical_audit_items_v3";
