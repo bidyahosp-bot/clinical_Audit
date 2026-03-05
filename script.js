@@ -1,9 +1,10 @@
 // Bidiyah Hospital Clinical Audit - script.js
 // -------------------------------------------
-// Changes:
-// - Re-Audits column => "Auditor Name" with {name, yyyymm}
-// - New column after Audit Name => "File Link" (editable URL)
-// - Notes column => "Re-Auditor Name & Date" with {name, yyyymm, note(optional)}
+// Features:
+// - Auditor column shows name only (date kept in data but hidden in list view)
+// - File Link column: Open + Download buttons
+// - Filter by Auditor Name (search box)
+// - Statistics: Top Auditor + counts per auditor
 // - SAFE updates: always fetch latest server copy before saving
 
 const APP_SCRIPT_URL =
@@ -14,7 +15,11 @@ const STORAGE_KEY = "clinical_audit_items_v4";
 const APP_MODE = window.APP_MODE || "manage";
 const isView = APP_MODE === "view";
 
-const STATE = { items: [], selectedYear: "all" };
+const STATE = {
+  items: [],
+  selectedYear: "all",
+  auditorFilter: "", // search text
+};
 
 // ---------- Utilities ----------
 function escapeHtml(str) {
@@ -49,6 +54,22 @@ function normalizeUrl(url) {
   return "https://" + u;
 }
 
+// Try to create a direct download link if it's a Google Drive "file/d/<id>"
+function buildDownloadUrl(url) {
+  const u = String(url || "").trim();
+  if (!u) return "";
+  const m = u.match(/drive\.google\.com\/file\/d\/([^/]+)/i);
+  if (m && m[1]) {
+    return `https://drive.google.com/uc?export=download&id=${m[1]}`;
+  }
+  // fallback: same URL
+  return u;
+}
+
+function toKeyName(s) {
+  return String(s || "").trim().toLowerCase();
+}
+
 // Keep 2024 visible
 function getYearList(items) {
   const nowYear = new Date().getFullYear();
@@ -66,11 +87,7 @@ function getYearStats(items) {
     if (!map.has(y)) map.set(y, { year: y, count: 0, reaudits: 0, notes: 0 });
     const obj = map.get(y);
     obj.count += 1;
-
-    // reaudits now array of objects
     obj.reaudits += Array.isArray(it.reaudits) ? it.reaudits.length : 0;
-
-    // notes now array of objects
     obj.notes += Array.isArray(it.notes) ? it.notes.length : 0;
   });
 
@@ -83,6 +100,28 @@ function filterByYear(items) {
   return (items || []).filter((it) => String(it.year) === String(STATE.selectedYear));
 }
 
+function filterByAuditor(items) {
+  const q = toKeyName(STATE.auditorFilter);
+  if (!q) return items;
+
+  return (items || []).filter((it) => {
+    const names = [];
+
+    // auditors (reaudits)
+    (it.reaudits || []).forEach((r) => {
+      if (typeof r === "string") return;
+      names.push(r?.name || "");
+    });
+
+    // re-auditor entries
+    (it.notes || []).forEach((n) => {
+      names.push(n?.name || n?.user || "");
+    });
+
+    return names.some((nm) => toKeyName(nm).includes(q));
+  });
+}
+
 // ---------- Backend ----------
 async function apiRequest(action, payload) {
   if (!APP_SCRIPT_URL) throw new Error("APP_SCRIPT_URL is not set");
@@ -93,7 +132,9 @@ async function apiRequest(action, payload) {
 
   const text = await res.text();
   let data = null;
-  try { data = JSON.parse(text); } catch {}
+  try {
+    data = JSON.parse(text);
+  } catch {}
 
   if (!res.ok || !data || data.ok !== true) {
     const msg = data?.error ? data.error : `Request failed (${res.status})`;
@@ -128,8 +169,6 @@ async function saveAllAudits(items) {
 function migrateItems_(items) {
   return (items || []).map((it) => {
     const out = { ...it };
-
-    // file link
     if (out.fileLink === undefined) out.fileLink = "";
 
     // reaudits migrate
@@ -137,10 +176,9 @@ function migrateItems_(items) {
       if (out.reaudits.length && typeof out.reaudits[0] === "string") {
         out.reaudits = out.reaudits.map((m) => ({ name: "", yyyymm: String(m || "") }));
       } else {
-        // ensure shape
         out.reaudits = out.reaudits.map((r) => ({
           name: String(r?.name || ""),
-          yyyymm: String(r?.yyyymm || r || ""),
+          yyyymm: String(r?.yyyymm || ""),
         }));
       }
     } else {
@@ -149,7 +187,6 @@ function migrateItems_(items) {
 
     // notes migrate
     if (Array.isArray(out.notes)) {
-      // old: {user,text,yyyymm}
       if (out.notes.length && out.notes[0] && out.notes[0].user !== undefined) {
         out.notes = out.notes.map((n) => ({
           name: String(n.user || ""),
@@ -167,9 +204,7 @@ function migrateItems_(items) {
       out.notes = [];
     }
 
-    // start
     out.startYYYYMM = String(out.startYYYYMM || "").trim();
-
     return out;
   });
 }
@@ -193,6 +228,123 @@ async function updateAuditOnServer(auditId, mutatorFn) {
 
   STATE.items = latest;
   renderAll();
+}
+
+// ---------- Statistics ----------
+function computeAuditorStats(items) {
+  const counts = new Map(); // auditorName -> count
+  (items || []).forEach((it) => {
+    (it.reaudits || []).forEach((r) => {
+      const nm = String(r?.name || "").trim();
+      if (!nm) return;
+      const key = toKeyName(nm);
+      counts.set(key, { name: nm, count: (counts.get(key)?.count || 0) + 1 });
+    });
+  });
+
+  const list = Array.from(counts.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  const top = list[0] || null;
+  return { top, list };
+}
+
+// ---------- UI helpers ----------
+function ensureEnhancementsUI() {
+  // Create a search box + stats panel if not exists
+  const host = document.querySelector(".container") || document.body;
+
+  if (!document.getElementById("auditorFilterBox")) {
+    const box = document.createElement("div");
+    box.id = "auditorFilterBox";
+    box.style.margin = "12px 0";
+    box.style.display = "flex";
+    box.style.gap = "10px";
+    box.style.alignItems = "center";
+    box.style.flexWrap = "wrap";
+
+    const label = document.createElement("div");
+    label.style.fontWeight = "600";
+    label.textContent = "Filter by Auditor Name:";
+    box.appendChild(label);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.placeholder = "Type auditor name...";
+    input.style.padding = "8px 10px";
+    input.style.borderRadius = "8px";
+    input.style.border = "1px solid #cfd6e4";
+    input.style.minWidth = "260px";
+    input.value = STATE.auditorFilter;
+    input.addEventListener("input", () => {
+      STATE.auditorFilter = input.value;
+      renderAll();
+    });
+    box.appendChild(input);
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "btn secondary";
+    clearBtn.textContent = "Clear";
+    clearBtn.addEventListener("click", () => {
+      STATE.auditorFilter = "";
+      input.value = "";
+      renderAll();
+    });
+    box.appendChild(clearBtn);
+
+    // insert before table if possible
+    const table = document.getElementById("auditsTable");
+    if (table && table.parentElement) {
+      table.parentElement.insertBefore(box, table);
+    } else {
+      host.prepend(box);
+    }
+  }
+
+  if (!document.getElementById("auditorStatsPanel")) {
+    const panel = document.createElement("div");
+    panel.id = "auditorStatsPanel";
+    panel.style.margin = "12px 0";
+    panel.style.padding = "12px";
+    panel.style.border = "1px solid #e2e8f0";
+    panel.style.borderRadius = "12px";
+    panel.style.background = "#fff";
+
+    // insert above table
+    const table = document.getElementById("auditsTable");
+    if (table && table.parentElement) {
+      table.parentElement.insertBefore(panel, table);
+    } else {
+      host.prepend(panel);
+    }
+  }
+}
+
+function renderAuditorStats(items) {
+  const panel = document.getElementById("auditorStatsPanel");
+  if (!panel) return;
+
+  const { top, list } = computeAuditorStats(items);
+
+  const topHtml = top
+    ? `<div style="font-size:18px;font-weight:700;">Top Auditor: ${escapeHtml(top.name)} <span style="font-weight:600;">(${top.count})</span></div>`
+    : `<div style="font-size:18px;font-weight:700;">Top Auditor: -</div>`;
+
+  const rows = list
+    .slice(0, 10)
+    .map((x) => `<tr><td style="padding:6px 10px;border-top:1px solid #eef2f7;">${escapeHtml(x.name)}</td><td style="padding:6px 10px;border-top:1px solid #eef2f7;">${x.count}</td></tr>`)
+    .join("");
+
+  panel.innerHTML = `
+    ${topHtml}
+    <div style="margin-top:10px;font-weight:600;">Audits per Auditor (Top 10)</div>
+    <table style="width:100%;border-collapse:collapse;margin-top:6px;">
+      <tr>
+        <th style="text-align:left;padding:6px 10px;background:#f7f9fc;border:1px solid #eef2f7;">Auditor</th>
+        <th style="text-align:left;padding:6px 10px;background:#f7f9fc;border:1px solid #eef2f7;">Count</th>
+      </tr>
+      ${rows || `<tr><td style="padding:8px 10px;border-top:1px solid #eef2f7;" colspan="2">No auditor entries yet.</td></tr>`}
+    </table>
+  `;
 }
 
 // ---------- UI ----------
@@ -243,8 +395,8 @@ function renderStatsGrid(items) {
 
   grid.innerHTML = `
     <div class="statbox"><div class="k">Total Audits</div><div class="v">${total}</div></div>
-    <div class="statbox"><div class="k">Total Re-Audits</div><div class="v">${totalRe}</div></div>
-    <div class="statbox"><div class="k">Total Entries</div><div class="v">${totalNotes}</div></div>
+    <div class="statbox"><div class="k">Total Auditor Entries</div><div class="v">${totalRe}</div></div>
+    <div class="statbox"><div class="k">Total Re-Auditor Entries</div><div class="v">${totalNotes}</div></div>
   `;
 }
 
@@ -262,7 +414,7 @@ function renderTable(items) {
   table.innerHTML = `
     <tr>
       <th>Clinical Audit Name</th>
-      <th>File Link</th>
+      <th>File</th>
       <th>Year</th>
       <th>Start (MM/YYYY)</th>
       <th>Auditor Name</th>
@@ -279,19 +431,27 @@ function renderTable(items) {
     tdName.textContent = audit.name || "";
     tr.appendChild(tdName);
 
-    // File Link
-    const tdLink = document.createElement("td");
+    // File
+    const tdFile = document.createElement("td");
     const link = String(audit.fileLink || "").trim();
 
     if (link) {
-      const a = document.createElement("a");
-      a.href = link;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = "Open";
-      tdLink.appendChild(a);
+      const openA = document.createElement("a");
+      openA.href = link;
+      openA.target = "_blank";
+      openA.rel = "noopener noreferrer";
+      openA.textContent = "Open";
+      tdFile.appendChild(openA);
+
+      const dl = document.createElement("a");
+      dl.href = buildDownloadUrl(link);
+      dl.target = "_blank";
+      dl.rel = "noopener noreferrer";
+      dl.textContent = "Download";
+      dl.style.marginLeft = "10px";
+      tdFile.appendChild(dl);
     } else {
-      tdLink.textContent = "-";
+      tdFile.textContent = "-";
     }
 
     if (!isView) {
@@ -313,10 +473,10 @@ function renderTable(items) {
       btn.textContent = "Save";
       ctrls.appendChild(btn);
 
-      tdLink.appendChild(ctrls);
+      tdFile.appendChild(ctrls);
     }
 
-    tr.appendChild(tdLink);
+    tr.appendChild(tdFile);
 
     // Year
     const tdYear = document.createElement("td");
@@ -328,18 +488,17 @@ function renderTable(items) {
     tdStart.textContent = monthToLabel(audit.startYYYYMM || "");
     tr.appendChild(tdStart);
 
-    // Auditor Name (Re-audit entries)
-    const tdRe = document.createElement("td");
-    const reList = document.createElement("ul");
-    reList.className = "reaudit-list";
+    // Auditor Name (show name only - no date)
+    const tdAud = document.createElement("td");
+    const list = document.createElement("ul");
+    list.className = "reaudit-list";
     (audit.reaudits || []).forEach((r) => {
       const li = document.createElement("li");
       const nm = String(r?.name || "").trim();
-      const dt = monthToLabel(r?.yyyymm || "");
-      li.textContent = nm ? `${nm} (${dt})` : dt;
-      reList.appendChild(li);
+      li.textContent = nm || "-"; // ✅ no date shown
+      list.appendChild(li);
     });
-    tdRe.appendChild(reList);
+    tdAud.appendChild(list);
 
     if (!isView) {
       const ctrls = document.createElement("div");
@@ -365,12 +524,12 @@ function renderTable(items) {
       btn.textContent = "Add";
       ctrls.appendChild(btn);
 
-      tdRe.appendChild(ctrls);
+      tdAud.appendChild(ctrls);
     }
 
-    tr.appendChild(tdRe);
+    tr.appendChild(tdAud);
 
-    // Re-Auditor Name & Date (notes entries)
+    // Re-Auditor Name & Date (name + date + optional note)
     const tdNotes = document.createElement("td");
     const notesDiv = document.createElement("div");
     notesDiv.className = "notes";
@@ -481,13 +640,22 @@ function renderTable(items) {
 }
 
 function renderAll() {
+  ensureEnhancementsUI();
+
   renderYearCards();
-  const filtered = filterByYear(STATE.items);
+
+  let filtered = filterByYear(STATE.items);
+  filtered = filterByAuditor(filtered);
 
   const title = document.getElementById("tableTitle");
-  if (title) title.textContent = STATE.selectedYear === "all" ? "All Audits" : `Audits - ${STATE.selectedYear}`;
+  if (title) {
+    const y = STATE.selectedYear === "all" ? "All Years" : STATE.selectedYear;
+    const q = STATE.auditorFilter ? ` | Auditor: "${STATE.auditorFilter}"` : "";
+    title.textContent = `All Audits - ${y}${q}`;
+  }
 
   renderStatsGrid(filtered);
+  renderAuditorStats(filtered);
   renderTable(filtered);
 }
 
@@ -531,9 +699,9 @@ async function onSaveNewAudit() {
     await saveAllAudits(latest);
     STATE.items = latest;
 
-    document.getElementById("auditName") && (document.getElementById("auditName").value = "");
-    document.getElementById("startMonth") && (document.getElementById("startMonth").value = "");
-    document.getElementById("fileLink") && (document.getElementById("fileLink").value = "");
+    if (document.getElementById("auditName")) document.getElementById("auditName").value = "";
+    if (document.getElementById("startMonth")) document.getElementById("startMonth").value = "";
+    if (document.getElementById("fileLink")) document.getElementById("fileLink").value = "";
 
     renderAll();
     alert("Saved successfully!");
@@ -550,7 +718,6 @@ async function saveFileLink(id) {
     await updateAuditOnServer(id, (audit) => {
       audit.fileLink = link || "";
     });
-
   } catch (e) {
     alert(`Save link failed: ${e.message || e}`);
   }
@@ -560,17 +727,22 @@ async function addReAudit(id) {
   try {
     const nameInp = document.querySelector(`.reaudit-name[data-id="${id}"]`);
     const monthInp = document.querySelector(`.reaudit-month[data-id="${id}"]`);
+
     const nm = (nameInp?.value || "").trim();
     const yyyymm = (monthInp?.value || "").trim();
 
-    if (!nm) { alert("Please enter Auditor name."); return; }
-    if (!yyyymm || !isValidYYYYMM(yyyymm)) { alert("Please select Month (YYYY-MM)."); return; }
+    if (!nm) {
+      alert("Please enter Auditor name.");
+      return;
+    }
+    if (!yyyymm || !isValidYYYYMM(yyyymm)) {
+      alert("Please select Month (YYYY-MM).");
+      return;
+    }
 
     await updateAuditOnServer(id, (audit) => {
-      audit.reaudits = Array.isArray(audit.reaudits) ? audit.reaudits : [];
       audit.reaudits.push({ name: nm, yyyymm });
     });
-
   } catch (e) {
     alert(`Add auditor entry failed: ${e.message || e}`);
   }
@@ -586,14 +758,18 @@ async function addNote(id) {
     const yyyymm = (monthInp?.value || "").trim();
     const note = (noteInp?.value || "").trim(); // optional
 
-    if (!nm) { alert("Please enter Re-auditor name."); return; }
-    if (!yyyymm || !isValidYYYYMM(yyyymm)) { alert("Please select Date (YYYY-MM)."); return; }
+    if (!nm) {
+      alert("Please enter Re-auditor name.");
+      return;
+    }
+    if (!yyyymm || !isValidYYYYMM(yyyymm)) {
+      alert("Please select Date (YYYY-MM).");
+      return;
+    }
 
     await updateAuditOnServer(id, (audit) => {
-      audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
       audit.notes.push({ name: nm, yyyymm, note: note || "" });
     });
-
   } catch (e) {
     alert(`Add entry failed: ${e.message || e}`);
   }
@@ -617,17 +793,21 @@ async function editNote(id, idx) {
     const yyyymm = newMonth.trim();
     const note = newNote.trim();
 
-    if (!nm) { alert("Name is required."); return; }
-    if (!yyyymm || !isValidYYYYMM(yyyymm)) { alert("Date must be YYYY-MM."); return; }
+    if (!nm) {
+      alert("Name is required.");
+      return;
+    }
+    if (!yyyymm || !isValidYYYYMM(yyyymm)) {
+      alert("Date must be YYYY-MM.");
+      return;
+    }
 
     await updateAuditOnServer(id, (audit) => {
-      audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
       if (!audit.notes[idx]) throw new Error("Entry not found.");
       audit.notes[idx].name = nm;
       audit.notes[idx].yyyymm = yyyymm;
       audit.notes[idx].note = note || "";
     });
-
   } catch (e) {
     alert(`Edit failed: ${e.message || e}`);
   }
@@ -638,11 +818,9 @@ async function deleteNote(id, idx) {
     if (!confirm("Delete this entry?")) return;
 
     await updateAuditOnServer(id, (audit) => {
-      audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
       if (idx < 0 || idx >= audit.notes.length) throw new Error("Entry not found.");
       audit.notes.splice(idx, 1);
     });
-
   } catch (e) {
     alert(`Delete failed: ${e.message || e}`);
   }
@@ -668,8 +846,14 @@ async function editAudit(id) {
     if (newLink === null) return;
     const fileLink = normalizeUrl(newLink.trim());
 
-    if (!year || !/^\d{4}$/.test(year) || !name) { alert("Invalid Year/Name."); return; }
-    if (startYYYYMM && !isValidYYYYMM(startYYYYMM)) { alert("Start must be YYYY-MM or empty."); return; }
+    if (!year || !/^\d{4}$/.test(year) || !name) {
+      alert("Invalid Year/Name.");
+      return;
+    }
+    if (startYYYYMM && !isValidYYYYMM(startYYYYMM)) {
+      alert("Start must be YYYY-MM or empty.");
+      return;
+    }
 
     const latest = await loadAllAudits();
     const idx = latest.findIndex((a) => String(a.id) === String(id));
@@ -683,7 +867,6 @@ async function editAudit(id) {
     await saveAllAudits(latest);
     STATE.items = latest;
     renderAll();
-
   } catch (e) {
     alert(`Edit audit failed: ${e.message || e}`);
   }
@@ -699,7 +882,6 @@ async function deleteAudit(id) {
     await saveAllAudits(filtered);
     STATE.items = filtered;
     renderAll();
-
   } catch (e) {
     alert(`Delete audit failed: ${e.message || e}`);
   }
@@ -707,8 +889,8 @@ async function deleteAudit(id) {
 
 // ---------- Export ----------
 function exportJSON() {
-  const filtered = filterByYear(STATE.items);
-  const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: "application/json" });
+  const items = filterByAuditor(filterByYear(STATE.items));
+  const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "clinical_audit_export.json";
@@ -716,13 +898,16 @@ function exportJSON() {
 }
 
 function exportToCSV() {
-  const filtered = filterByYear(STATE.items);
-  if (!filtered.length) { alert("No data to export"); return; }
+  const items = filterByAuditor(filterByYear(STATE.items));
+  if (!items.length) {
+    alert("No data to export");
+    return;
+  }
 
-  let csv = "ID,Year,AuditName,FileLink,Start(YYYY-MM),Auditors(ReAudit),ReAuditorEntries\n";
+  let csv = "ID,Year,AuditName,FileLink,Start(YYYY-MM),Auditors,ReAuditorEntries\n";
 
-  filtered.forEach((row) => {
-    const re = (row.reaudits || [])
+  items.forEach((row) => {
+    const auditors = (row.reaudits || [])
       .map((r) => `${r.name || ""}:${r.yyyymm || ""}`)
       .join(" | ");
 
@@ -736,9 +921,11 @@ function exportToCSV() {
       (row.name || "").replaceAll('"', '""'),
       (row.fileLink || "").replaceAll('"', '""'),
       row.startYYYYMM || "",
-      re.replaceAll('"', '""'),
+      auditors.replaceAll('"', '""'),
       entries.replaceAll('"', '""'),
-    ].map((v) => `"${String(v)}"`).join(",");
+    ]
+      .map((v) => `"${String(v)}"`)
+      .join(",");
 
     csv += line + "\n";
   });
