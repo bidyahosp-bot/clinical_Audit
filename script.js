@@ -1,32 +1,22 @@
 // Bidiyah Hospital Clinical Audit - script.js
 // -------------------------------------------
-// Supports:
-// - Manage page (index.html) + View page (view.html)
-// - Google Sheet backend via Apps Script (list / replace_all)
-// - Year cards stats + filtering
-// - Add / Edit / Delete audits
-// - Add / Edit / Delete notes (SAFE: always updates latest server copy)
-// - Add re-audit (SAFE: always updates latest server copy)
-// - Export JSON / CSV (View page)
+// Changes:
+// - Re-Audits column => "Auditor Name" with {name, yyyymm}
+// - New column after Audit Name => "File Link" (editable URL)
+// - Notes column => "Re-Auditor Name & Date" with {name, yyyymm, note(optional)}
+// - SAFE updates: always fetch latest server copy before saving
 
-// Paste your deployed Apps Script Web App URL here (must end with /exec)
 const APP_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbyvwGH45jfOgDUhGL5F7u7zB0moic3fBbH2tzQGuUvsViC5B68Y5v4ZsP4IHowIN8q4/exec";
 
-// Fallback single-device storage (only used if APP_SCRIPT_URL = "")
-const STORAGE_KEY = "clinical_audit_items_v3";
+const STORAGE_KEY = "clinical_audit_items_v4";
 
-// App mode: manage or view
 const APP_MODE = window.APP_MODE || "manage";
 const isView = APP_MODE === "view";
 
-// Global state
-const STATE = {
-  items: [],
-  selectedYear: "all",
-};
+const STATE = { items: [], selectedYear: "all" };
 
-// ---------------- Utilities ----------------
+// ---------- Utilities ----------
 function escapeHtml(str) {
   return String(str || "")
     .replaceAll("&", "&amp;")
@@ -44,17 +34,26 @@ function monthToLabel(yyyymm) {
   return `${match[2]}/${match[1]}`;
 }
 
+function isValidYYYYMM(v) {
+  return /^\d{4}-\d{2}$/.test(String(v || "").trim());
+}
+
 function makeId() {
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-// Include 2024 always (and nearby years)
+function normalizeUrl(url) {
+  const u = String(url || "").trim();
+  if (!u) return "";
+  if (/^https?:\/\//i.test(u)) return u;
+  return "https://" + u;
+}
+
+// Keep 2024 visible
 function getYearList(items) {
   const nowYear = new Date().getFullYear();
   const s = new Set(["2024", String(nowYear - 1), String(nowYear), String(nowYear + 1)]);
-  (items || []).forEach((it) => {
-    if (it && it.year) s.add(String(it.year));
-  });
+  (items || []).forEach((it) => it?.year && s.add(String(it.year)));
   return Array.from(s).sort((a, b) => Number(b) - Number(a));
 }
 
@@ -63,16 +62,19 @@ function getYearStats(items) {
   (items || []).forEach((it) => {
     const y = String(it.year || "");
     if (!y) return;
+
     if (!map.has(y)) map.set(y, { year: y, count: 0, reaudits: 0, notes: 0 });
     const obj = map.get(y);
     obj.count += 1;
-    obj.reaudits += (it.reaudits || []).length;
-    obj.notes += (it.notes || []).length;
+
+    // reaudits now array of objects
+    obj.reaudits += Array.isArray(it.reaudits) ? it.reaudits.length : 0;
+
+    // notes now array of objects
+    obj.notes += Array.isArray(it.notes) ? it.notes.length : 0;
   });
 
-  // Ensure 2024 visible even if empty
   if (!map.has("2024")) map.set("2024", { year: "2024", count: 0, reaudits: 0, notes: 0 });
-
   return Array.from(map.values()).sort((a, b) => Number(b.year) - Number(a.year));
 }
 
@@ -81,24 +83,20 @@ function filterByYear(items) {
   return (items || []).filter((it) => String(it.year) === String(STATE.selectedYear));
 }
 
-// ---------------- Backend ----------------
+// ---------- Backend ----------
 async function apiRequest(action, payload) {
   if (!APP_SCRIPT_URL) throw new Error("APP_SCRIPT_URL is not set");
-
   const res = await fetch(APP_SCRIPT_URL, {
     method: "POST",
-    // no headers to reduce CORS preflight issues
     body: JSON.stringify({ action, payload }),
   });
 
   const text = await res.text();
   let data = null;
-  try {
-    data = JSON.parse(text);
-  } catch {}
+  try { data = JSON.parse(text); } catch {}
 
   if (!res.ok || !data || data.ok !== true) {
-    const msg = data && data.error ? data.error : `Request failed (${res.status})`;
+    const msg = data?.error ? data.error : `Request failed (${res.status})`;
     throw new Error(msg);
   }
   return data;
@@ -107,9 +105,10 @@ async function apiRequest(action, payload) {
 async function loadAllAudits() {
   if (APP_SCRIPT_URL) {
     const data = await apiRequest("list", {});
-    return Array.isArray(data.items) ? data.items : [];
+    const items = Array.isArray(data.items) ? data.items : [];
+    return migrateItems_(items);
   }
-  return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+  return migrateItems_(JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"));
 }
 
 async function saveAllAudits(items) {
@@ -121,18 +120,72 @@ async function saveAllAudits(items) {
 }
 
 /**
- * ✅ SAFE UPDATE HELPER:
- * Always fetch latest server copy, apply a mutation, then save.
- * Prevents losing notes if multiple users/devices update.
+ * MIGRATION:
+ * - Old reaudits: ["2026-01"] => [{name:"", yyyymm:"2026-01"}]
+ * - Old notes: {user,text,yyyymm} => {name:user, yyyymm, note:text}
+ * - fileLink default ""
+ */
+function migrateItems_(items) {
+  return (items || []).map((it) => {
+    const out = { ...it };
+
+    // file link
+    if (out.fileLink === undefined) out.fileLink = "";
+
+    // reaudits migrate
+    if (Array.isArray(out.reaudits)) {
+      if (out.reaudits.length && typeof out.reaudits[0] === "string") {
+        out.reaudits = out.reaudits.map((m) => ({ name: "", yyyymm: String(m || "") }));
+      } else {
+        // ensure shape
+        out.reaudits = out.reaudits.map((r) => ({
+          name: String(r?.name || ""),
+          yyyymm: String(r?.yyyymm || r || ""),
+        }));
+      }
+    } else {
+      out.reaudits = [];
+    }
+
+    // notes migrate
+    if (Array.isArray(out.notes)) {
+      // old: {user,text,yyyymm}
+      if (out.notes.length && out.notes[0] && out.notes[0].user !== undefined) {
+        out.notes = out.notes.map((n) => ({
+          name: String(n.user || ""),
+          yyyymm: String(n.yyyymm || ""),
+          note: String(n.text || ""),
+        }));
+      } else {
+        out.notes = out.notes.map((n) => ({
+          name: String(n?.name || n?.user || ""),
+          yyyymm: String(n?.yyyymm || ""),
+          note: String(n?.note || n?.text || ""),
+        }));
+      }
+    } else {
+      out.notes = [];
+    }
+
+    // start
+    out.startYYYYMM = String(out.startYYYYMM || "").trim();
+
+    return out;
+  });
+}
+
+/**
+ * SAFE UPDATE:
+ * always fetch latest, mutate, then save
  */
 async function updateAuditOnServer(auditId, mutatorFn) {
   const latest = await loadAllAudits();
-
   const idx = latest.findIndex((a) => String(a.id) === String(auditId));
   if (idx === -1) throw new Error("Audit not found on server.");
 
   latest[idx].reaudits = Array.isArray(latest[idx].reaudits) ? latest[idx].reaudits : [];
   latest[idx].notes = Array.isArray(latest[idx].notes) ? latest[idx].notes : [];
+  if (latest[idx].fileLink === undefined) latest[idx].fileLink = "";
 
   mutatorFn(latest[idx]);
 
@@ -142,7 +195,7 @@ async function updateAuditOnServer(auditId, mutatorFn) {
   renderAll();
 }
 
-// ---------------- UI Rendering ----------------
+// ---------- UI ----------
 function renderYearCards() {
   const container = document.getElementById("yearCards");
   if (!container) return;
@@ -164,7 +217,6 @@ function renderYearCards() {
   container.innerHTML = "";
   container.appendChild(allCard);
 
-  // Ensure cards order newest → oldest from year list
   const years = getYearList(STATE.items);
   const byYear = new Map(stats.map((s) => [s.year, s]));
   years.forEach((y) => {
@@ -192,7 +244,7 @@ function renderStatsGrid(items) {
   grid.innerHTML = `
     <div class="statbox"><div class="k">Total Audits</div><div class="v">${total}</div></div>
     <div class="statbox"><div class="k">Total Re-Audits</div><div class="v">${totalRe}</div></div>
-    <div class="statbox"><div class="k">Total Notes</div><div class="v">${totalNotes}</div></div>
+    <div class="statbox"><div class="k">Total Entries</div><div class="v">${totalNotes}</div></div>
   `;
 }
 
@@ -204,18 +256,17 @@ function renderTable(items) {
     const ya = Number(a.year || 0);
     const yb = Number(b.year || 0);
     if (yb !== ya) return yb - ya;
-    const ma = a.startYYYYMM || "";
-    const mb = b.startYYYYMM || "";
-    return String(mb).localeCompare(String(ma));
+    return String(b.startYYYYMM || "").localeCompare(String(a.startYYYYMM || ""));
   });
 
   table.innerHTML = `
     <tr>
       <th>Clinical Audit Name</th>
+      <th>File Link</th>
       <th>Year</th>
       <th>Start (MM/YYYY)</th>
-      <th>Re-Audits</th>
-      <th>Notes</th>
+      <th>Auditor Name</th>
+      <th>Re-Auditor Name & Date</th>
       ${isView ? "" : "<th>Actions</th>"}
     </tr>
   `;
@@ -228,6 +279,45 @@ function renderTable(items) {
     tdName.textContent = audit.name || "";
     tr.appendChild(tdName);
 
+    // File Link
+    const tdLink = document.createElement("td");
+    const link = String(audit.fileLink || "").trim();
+
+    if (link) {
+      const a = document.createElement("a");
+      a.href = link;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Open";
+      tdLink.appendChild(a);
+    } else {
+      tdLink.textContent = "-";
+    }
+
+    if (!isView) {
+      const ctrls = document.createElement("div");
+      ctrls.className = "inline-controls";
+
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.placeholder = "Paste file link...";
+      inp.className = "file-link";
+      inp.dataset.id = audit.id;
+      inp.value = link;
+      ctrls.appendChild(inp);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn secondary btn-save-link";
+      btn.dataset.id = audit.id;
+      btn.textContent = "Save";
+      ctrls.appendChild(btn);
+
+      tdLink.appendChild(ctrls);
+    }
+
+    tr.appendChild(tdLink);
+
     // Year
     const tdYear = document.createElement("td");
     tdYear.textContent = audit.year || "";
@@ -238,13 +328,15 @@ function renderTable(items) {
     tdStart.textContent = monthToLabel(audit.startYYYYMM || "");
     tr.appendChild(tdStart);
 
-    // Re-Audits
+    // Auditor Name (Re-audit entries)
     const tdRe = document.createElement("td");
     const reList = document.createElement("ul");
     reList.className = "reaudit-list";
     (audit.reaudits || []).forEach((r) => {
       const li = document.createElement("li");
-      li.textContent = monthToLabel(r);
+      const nm = String(r?.name || "").trim();
+      const dt = monthToLabel(r?.yyyymm || "");
+      li.textContent = nm ? `${nm} (${dt})` : dt;
       reList.appendChild(li);
     });
     tdRe.appendChild(reList);
@@ -253,25 +345,32 @@ function renderTable(items) {
       const ctrls = document.createElement("div");
       ctrls.className = "inline-controls";
 
-      const reMonth = document.createElement("input");
-      reMonth.type = "month";
-      reMonth.className = "reaudit-month";
-      reMonth.dataset.id = audit.id;
-      ctrls.appendChild(reMonth);
+      const nameInp = document.createElement("input");
+      nameInp.type = "text";
+      nameInp.placeholder = "Auditor name...";
+      nameInp.className = "reaudit-name";
+      nameInp.dataset.id = audit.id;
+      ctrls.appendChild(nameInp);
 
-      const reBtn = document.createElement("button");
-      reBtn.type = "button";
-      reBtn.className = "btn secondary btn-add-reaudit";
-      reBtn.dataset.id = audit.id;
-      reBtn.textContent = "Add";
-      ctrls.appendChild(reBtn);
+      const monthInp = document.createElement("input");
+      monthInp.type = "month";
+      monthInp.className = "reaudit-month";
+      monthInp.dataset.id = audit.id;
+      ctrls.appendChild(monthInp);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn secondary btn-add-reaudit";
+      btn.dataset.id = audit.id;
+      btn.textContent = "Add";
+      ctrls.appendChild(btn);
 
       tdRe.appendChild(ctrls);
     }
 
     tr.appendChild(tdRe);
 
-    // Notes
+    // Re-Auditor Name & Date (notes entries)
     const tdNotes = document.createElement("td");
     const notesDiv = document.createElement("div");
     notesDiv.className = "notes";
@@ -280,10 +379,12 @@ function renderTable(items) {
       const div = document.createElement("div");
       div.className = "note";
 
+      const nm = String(n?.name || "").trim();
+      const dt = monthToLabel(n?.yyyymm || "");
+      const note = String(n?.note || "").trim();
+
       const label = document.createElement("span");
-      label.innerHTML = `<strong>${escapeHtml(n.user || "")}</strong> (${escapeHtml(
-        monthToLabel(n.yyyymm || "")
-      )}): ${escapeHtml(n.text || "")}`;
+      label.innerHTML = `<strong>${escapeHtml(nm)}</strong> (${escapeHtml(dt)})${note ? `: ${escapeHtml(note)}` : ""}`;
       div.appendChild(label);
 
       if (!isView) {
@@ -323,23 +424,23 @@ function renderTable(items) {
       const ctrls = document.createElement("div");
       ctrls.className = "inline-controls";
 
-      const noteText = document.createElement("input");
-      noteText.placeholder = "Add note...";
-      noteText.className = "note-text";
-      noteText.dataset.id = audit.id;
-      ctrls.appendChild(noteText);
+      const nameInp = document.createElement("input");
+      nameInp.placeholder = "Re-auditor name...";
+      nameInp.className = "note-name";
+      nameInp.dataset.id = audit.id;
+      ctrls.appendChild(nameInp);
 
-      const noteUser = document.createElement("input");
-      noteUser.placeholder = "Your name...";
-      noteUser.className = "note-user";
-      noteUser.dataset.id = audit.id;
-      ctrls.appendChild(noteUser);
+      const monthInp = document.createElement("input");
+      monthInp.type = "month";
+      monthInp.className = "note-month";
+      monthInp.dataset.id = audit.id;
+      ctrls.appendChild(monthInp);
 
-      const noteMonth = document.createElement("input");
-      noteMonth.type = "month";
-      noteMonth.className = "note-month";
-      noteMonth.dataset.id = audit.id;
-      ctrls.appendChild(noteMonth);
+      const noteInp = document.createElement("input");
+      noteInp.placeholder = "Optional note...";
+      noteInp.className = "note-text";
+      noteInp.dataset.id = audit.id;
+      ctrls.appendChild(noteInp);
 
       const addBtn = document.createElement("button");
       addBtn.type = "button";
@@ -384,15 +485,13 @@ function renderAll() {
   const filtered = filterByYear(STATE.items);
 
   const title = document.getElementById("tableTitle");
-  if (title) {
-    title.textContent = STATE.selectedYear === "all" ? "All Audits" : `Audits - ${STATE.selectedYear}`;
-  }
+  if (title) title.textContent = STATE.selectedYear === "all" ? "All Audits" : `Audits - ${STATE.selectedYear}`;
 
   renderStatsGrid(filtered);
   renderTable(filtered);
 }
 
-// ---------------- Actions ----------------
+// ---------- Actions ----------
 async function refresh() {
   try {
     STATE.items = await loadAllAudits();
@@ -407,12 +506,13 @@ async function onSaveNewAudit() {
     const year = (document.getElementById("yearSelect")?.value || "").trim();
     const name = (document.getElementById("auditName")?.value || "").trim();
     const startYYYYMM = (document.getElementById("startMonth")?.value || "").trim();
+    const fileLink = normalizeUrl((document.getElementById("fileLink")?.value || "").trim());
 
     if (!year || !/^\d{4}$/.test(year) || !name) {
       alert("Please enter a valid Year (YYYY) and Audit Name.");
       return;
     }
-    if (startYYYYMM && !/^\d{4}-\d{2}$/.test(startYYYYMM)) {
+    if (startYYYYMM && !isValidYYYYMM(startYYYYMM)) {
       alert("Start Month must be like YYYY-MM or empty.");
       return;
     }
@@ -422,6 +522,7 @@ async function onSaveNewAudit() {
       id: makeId(),
       year,
       name,
+      fileLink: fileLink || "",
       startYYYYMM,
       reaudits: [],
       notes: [],
@@ -430,10 +531,9 @@ async function onSaveNewAudit() {
     await saveAllAudits(latest);
     STATE.items = latest;
 
-    const auditName = document.getElementById("auditName");
-    const startMonth = document.getElementById("startMonth");
-    if (auditName) auditName.value = "";
-    if (startMonth) startMonth.value = "";
+    document.getElementById("auditName") && (document.getElementById("auditName").value = "");
+    document.getElementById("startMonth") && (document.getElementById("startMonth").value = "");
+    document.getElementById("fileLink") && (document.getElementById("fileLink").value = "");
 
     renderAll();
     alert("Saved successfully!");
@@ -442,53 +542,60 @@ async function onSaveNewAudit() {
   }
 }
 
+async function saveFileLink(id) {
+  try {
+    const inp = document.querySelector(`.file-link[data-id="${id}"]`);
+    const link = normalizeUrl((inp?.value || "").trim());
+
+    await updateAuditOnServer(id, (audit) => {
+      audit.fileLink = link || "";
+    });
+
+  } catch (e) {
+    alert(`Save link failed: ${e.message || e}`);
+  }
+}
+
 async function addReAudit(id) {
   try {
-    const monthInput = document.querySelector(`.reaudit-month[data-id="${id}"]`);
-    const yyyymm = (monthInput?.value || "").trim();
-    if (!yyyymm) {
-      alert("Please select re-audit month.");
-      return;
-    }
-    if (!/^\d{4}-\d{2}$/.test(yyyymm)) {
-      alert("Re-audit month must be YYYY-MM.");
-      return;
-    }
+    const nameInp = document.querySelector(`.reaudit-name[data-id="${id}"]`);
+    const monthInp = document.querySelector(`.reaudit-month[data-id="${id}"]`);
+    const nm = (nameInp?.value || "").trim();
+    const yyyymm = (monthInp?.value || "").trim();
+
+    if (!nm) { alert("Please enter Auditor name."); return; }
+    if (!yyyymm || !isValidYYYYMM(yyyymm)) { alert("Please select Month (YYYY-MM)."); return; }
 
     await updateAuditOnServer(id, (audit) => {
       audit.reaudits = Array.isArray(audit.reaudits) ? audit.reaudits : [];
-      audit.reaudits.push(yyyymm);
+      audit.reaudits.push({ name: nm, yyyymm });
     });
+
   } catch (e) {
-    alert(`Add re-audit failed: ${e.message || e}`);
+    alert(`Add auditor entry failed: ${e.message || e}`);
   }
 }
 
 async function addNote(id) {
   try {
-    const noteInput = document.querySelector(`.note-text[data-id="${id}"]`);
-    const userInput = document.querySelector(`.note-user[data-id="${id}"]`);
-    const monthInput = document.querySelector(`.note-month[data-id="${id}"]`);
+    const nameInp = document.querySelector(`.note-name[data-id="${id}"]`);
+    const monthInp = document.querySelector(`.note-month[data-id="${id}"]`);
+    const noteInp = document.querySelector(`.note-text[data-id="${id}"]`);
 
-    const text = (noteInput?.value || "").trim();
-    const user = (userInput?.value || "").trim();
-    const yyyymm = (monthInput?.value || "").trim();
+    const nm = (nameInp?.value || "").trim();
+    const yyyymm = (monthInp?.value || "").trim();
+    const note = (noteInp?.value || "").trim(); // optional
 
-    if (!text || !user) {
-      alert("Please enter both note and your name.");
-      return;
-    }
-    if (yyyymm && !/^\d{4}-\d{2}$/.test(yyyymm)) {
-      alert("Month must be like YYYY-MM or empty.");
-      return;
-    }
+    if (!nm) { alert("Please enter Re-auditor name."); return; }
+    if (!yyyymm || !isValidYYYYMM(yyyymm)) { alert("Please select Date (YYYY-MM)."); return; }
 
     await updateAuditOnServer(id, (audit) => {
       audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
-      audit.notes.push({ user, text, yyyymm: yyyymm || "" });
+      audit.notes.push({ name: nm, yyyymm, note: note || "" });
     });
+
   } catch (e) {
-    alert(`Add note failed: ${e.message || e}`);
+    alert(`Add entry failed: ${e.message || e}`);
   }
 }
 
@@ -497,35 +604,30 @@ async function editNote(id, idx) {
     const auditLocal = STATE.items.find((a) => a.id === id);
     const current = auditLocal?.notes?.[idx] || {};
 
-    const newText = prompt("Edit note text:", current.text || "");
-    if (newText === null) return;
+    const newName = prompt("Re-auditor name:", current.name || "");
+    if (newName === null) return;
 
-    const newUser = prompt("Edit note user/name:", current.user || "");
-    if (newUser === null) return;
-
-    const newMonth = prompt("Edit note month (YYYY-MM) - leave empty if none:", current.yyyymm || "");
+    const newMonth = prompt("Date (YYYY-MM):", current.yyyymm || "");
     if (newMonth === null) return;
 
-    const text = newText.trim();
-    const user = newUser.trim();
-    const yyyymm = newMonth.trim();
+    const newNote = prompt("Optional note:", current.note || "");
+    if (newNote === null) return;
 
-    if (!text || !user) {
-      alert("Note text and user cannot be empty.");
-      return;
-    }
-    if (yyyymm && !/^\d{4}-\d{2}$/.test(yyyymm)) {
-      alert("Month must be like YYYY-MM or empty.");
-      return;
-    }
+    const nm = newName.trim();
+    const yyyymm = newMonth.trim();
+    const note = newNote.trim();
+
+    if (!nm) { alert("Name is required."); return; }
+    if (!yyyymm || !isValidYYYYMM(yyyymm)) { alert("Date must be YYYY-MM."); return; }
 
     await updateAuditOnServer(id, (audit) => {
       audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
-      if (!audit.notes[idx]) throw new Error("Note not found.");
-      audit.notes[idx].text = text;
-      audit.notes[idx].user = user;
+      if (!audit.notes[idx]) throw new Error("Entry not found.");
+      audit.notes[idx].name = nm;
       audit.notes[idx].yyyymm = yyyymm;
+      audit.notes[idx].note = note || "";
     });
+
   } catch (e) {
     alert(`Edit failed: ${e.message || e}`);
   }
@@ -533,13 +635,14 @@ async function editNote(id, idx) {
 
 async function deleteNote(id, idx) {
   try {
-    if (!confirm("Delete this note?")) return;
+    if (!confirm("Delete this entry?")) return;
 
     await updateAuditOnServer(id, (audit) => {
       audit.notes = Array.isArray(audit.notes) ? audit.notes : [];
-      if (idx < 0 || idx >= audit.notes.length) throw new Error("Note not found.");
+      if (idx < 0 || idx >= audit.notes.length) throw new Error("Entry not found.");
       audit.notes.splice(idx, 1);
     });
+
   } catch (e) {
     alert(`Delete failed: ${e.message || e}`);
   }
@@ -549,26 +652,24 @@ async function editAudit(id) {
   try {
     const auditLocal = STATE.items.find((a) => a.id === id) || {};
 
-    const newYear = prompt("Edit Year (e.g. 2026):", String(auditLocal.year || ""));
+    const newYear = prompt("Edit Year (YYYY):", String(auditLocal.year || ""));
     if (newYear === null) return;
     const year = newYear.trim();
 
-    const newName = prompt("Edit Clinical Audit Name:", auditLocal.name || "");
+    const newName = prompt("Edit Audit Name:", auditLocal.name || "");
     if (newName === null) return;
     const name = newName.trim();
 
-    const newStart = prompt("Edit Start Month (YYYY-MM) - leave empty if none:", auditLocal.startYYYYMM || "");
+    const newStart = prompt("Edit Start Month (YYYY-MM) or empty:", auditLocal.startYYYYMM || "");
     if (newStart === null) return;
     const startYYYYMM = newStart.trim();
 
-    if (!year || !/^\d{4}$/.test(year) || !name) {
-      alert("Please enter a valid Year (YYYY) and Name.");
-      return;
-    }
-    if (startYYYYMM && !/^\d{4}-\d{2}$/.test(startYYYYMM)) {
-      alert("Start Month must be like YYYY-MM or empty.");
-      return;
-    }
+    const newLink = prompt("Edit File Link (optional):", auditLocal.fileLink || "");
+    if (newLink === null) return;
+    const fileLink = normalizeUrl(newLink.trim());
+
+    if (!year || !/^\d{4}$/.test(year) || !name) { alert("Invalid Year/Name."); return; }
+    if (startYYYYMM && !isValidYYYYMM(startYYYYMM)) { alert("Start must be YYYY-MM or empty."); return; }
 
     const latest = await loadAllAudits();
     const idx = latest.findIndex((a) => String(a.id) === String(id));
@@ -577,10 +678,12 @@ async function editAudit(id) {
     latest[idx].year = year;
     latest[idx].name = name;
     latest[idx].startYYYYMM = startYYYYMM;
+    latest[idx].fileLink = fileLink || "";
 
     await saveAllAudits(latest);
     STATE.items = latest;
     renderAll();
+
   } catch (e) {
     alert(`Edit audit failed: ${e.message || e}`);
   }
@@ -596,12 +699,13 @@ async function deleteAudit(id) {
     await saveAllAudits(filtered);
     STATE.items = filtered;
     renderAll();
+
   } catch (e) {
     alert(`Delete audit failed: ${e.message || e}`);
   }
 }
 
-// ---------------- Export ----------------
+// ---------- Export ----------
 function exportJSON() {
   const filtered = filterByYear(STATE.items);
   const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: "application/json" });
@@ -613,29 +717,28 @@ function exportJSON() {
 
 function exportToCSV() {
   const filtered = filterByYear(STATE.items);
-  if (!filtered.length) {
-    alert("No data to export");
-    return;
-  }
+  if (!filtered.length) { alert("No data to export"); return; }
 
-  let csv = "ID,Year,Name,Start(YYYY-MM),ReAudits,Notes\n";
+  let csv = "ID,Year,AuditName,FileLink,Start(YYYY-MM),Auditors(ReAudit),ReAuditorEntries\n";
 
   filtered.forEach((row) => {
-    const re = (row.reaudits || []).join(" | ");
-    const notes = (row.notes || [])
-      .map((n) => `${n.user || ""}:${n.yyyymm || ""}:${(n.text || "").replaceAll("\n", " ")}`)
+    const re = (row.reaudits || [])
+      .map((r) => `${r.name || ""}:${r.yyyymm || ""}`)
+      .join(" | ");
+
+    const entries = (row.notes || [])
+      .map((n) => `${n.name || ""}:${n.yyyymm || ""}:${(n.note || "").replaceAll("\n", " ")}`)
       .join(" || ");
 
     const line = [
       row.id || "",
       row.year || "",
       (row.name || "").replaceAll('"', '""'),
+      (row.fileLink || "").replaceAll('"', '""'),
       row.startYYYYMM || "",
       re.replaceAll('"', '""'),
-      notes.replaceAll('"', '""'),
-    ]
-      .map((v) => `"${String(v)}"`)
-      .join(",");
+      entries.replaceAll('"', '""'),
+    ].map((v) => `"${String(v)}"`).join(",");
 
     csv += line + "\n";
   });
@@ -647,31 +750,28 @@ function exportToCSV() {
   link.click();
 }
 
-// ---------------- Boot ----------------
+// ---------- Boot ----------
 document.addEventListener("DOMContentLoaded", () => {
-  // Page buttons
   document.getElementById("saveBtn")?.addEventListener("click", onSaveNewAudit);
   document.getElementById("btnRefresh")?.addEventListener("click", refresh);
   document.getElementById("btnExport")?.addEventListener("click", exportJSON);
 
-  // Expose CSV export (used in view.html button if present)
   window.exportToCSV = exportToCSV;
 
-  // Year cards click
   document.getElementById("yearCards")?.addEventListener("click", (e) => {
     const t = e.target.closest(".card");
     if (!t) return;
-    const year = t.dataset.year;
-    STATE.selectedYear = year || "all";
+    STATE.selectedYear = t.dataset.year || "all";
     renderAll();
   });
 
-  // Delegation for dynamic buttons
   document.addEventListener("click", (e) => {
     const t = e.target;
     if (!(t instanceof HTMLElement)) return;
 
-    if (t.classList.contains("btn-add-reaudit")) {
+    if (t.classList.contains("btn-save-link")) {
+      saveFileLink(t.dataset.id);
+    } else if (t.classList.contains("btn-add-reaudit")) {
       addReAudit(t.dataset.id);
     } else if (t.classList.contains("btn-add-note")) {
       addNote(t.dataset.id);
