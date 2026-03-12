@@ -10,8 +10,9 @@
   <div class="header">
     <img src="logo.png" class="logo">
     <h2>View & Statistics</h2>
-</div>
-<header class="topbar">
+  </div>
+
+  <header class="topbar">
     <h1>Bidiyah Hospital Clinical Audit</h1>
     <nav class="topnav">
       <a class="navlink" href="index.html">Manage</a>
@@ -19,22 +20,19 @@
     </nav>
   </header>
 
-  <section class="cards" id="yearCards">
-    <!-- Filled by JS -->
-  </section>
-<button onclick="exportToCSV()" class="export-btn">Export to Excel</button>
+  <section class="cards" id="yearCards"></section>
+
   <section class="panel">
     <div class="table-head">
       <h2 id="tableTitle">All Audits</h2>
       <div class="table-actions">
         <button class="btn secondary" id="btnRefresh">Refresh</button>
         <button class="btn" id="btnExport">Export JSON</button>
+        <button class="btn secondary" onclick="exportToCSV()">Export CSV</button>
       </div>
     </div>
 
-    <div class="stats-grid" id="globalStats">
-      <!-- Filled by JS -->
-    </div>
+    <div class="stats-grid" id="globalStats"></div>
 
     <div class="table-wrap">
       <table id="auditsTable"></table>
@@ -44,7 +42,7 @@
   <footer class="footer">PREPARED BY: JOUHARAH.IT</footer>
 
   <script>
-    window.APP_MODE = 'view';
+    window.APP_MODE = "view";
   </script>
   <script src="script.js"></script>
 </body>
