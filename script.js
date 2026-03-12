@@ -1,27 +1,18 @@
 // Bidiyah Hospital Clinical Audit - script.js
-// -------------------------------------------
-// Features:
-// - Auditor column shows name only (date kept in data but hidden in list view)
-// - File Link column: Open + Download buttons
-// - Filter by Auditor Name (search box)
-// - Statistics: Top Auditor + counts per auditor
-// - SAFE updates: always fetch latest server copy before saving
 
 const APP_SCRIPT_URL =
   "https://script.google.com/macros/s/AKfycbyvwGH45jfOgDUhGL5F7u7zB0moic3fBbH2tzQGuUvsViC5B68Y5v4ZsP4IHowIN8q4/exec";
 
-const STORAGE_KEY = "clinical_audit_items_v4";
-
+const STORAGE_KEY = "clinical_audit_items_v5";
 const APP_MODE = window.APP_MODE || "manage";
 const isView = APP_MODE === "view";
 
 const STATE = {
   items: [],
   selectedYear: "all",
-  auditorFilter: "", // search text
+  auditorFilter: "",
 };
 
-// ---------- Utilities ----------
 function escapeHtml(str) {
   return String(str || "")
     .replaceAll("&", "&amp;")
@@ -54,7 +45,6 @@ function normalizeUrl(url) {
   return "https://" + u;
 }
 
-// Try to create a direct download link if it's a Google Drive "file/d/<id>"
 function buildDownloadUrl(url) {
   const u = String(url || "").trim();
   if (!u) return "";
@@ -62,7 +52,6 @@ function buildDownloadUrl(url) {
   if (m && m[1]) {
     return `https://drive.google.com/uc?export=download&id=${m[1]}`;
   }
-  // fallback: same URL
   return u;
 }
 
@@ -70,7 +59,6 @@ function toKeyName(s) {
   return String(s || "").trim().toLowerCase();
 }
 
-// Keep 2024 visible
 function getYearList(items) {
   const nowYear = new Date().getFullYear();
   const s = new Set(["2024", String(nowYear - 1), String(nowYear), String(nowYear + 1)]);
@@ -106,25 +94,15 @@ function filterByAuditor(items) {
 
   return (items || []).filter((it) => {
     const names = [];
-
-    // auditors (reaudits)
-    (it.reaudits || []).forEach((r) => {
-      if (typeof r === "string") return;
-      names.push(r?.name || "");
-    });
-
-    // re-auditor entries
-    (it.notes || []).forEach((n) => {
-      names.push(n?.name || n?.user || "");
-    });
-
+    (it.reaudits || []).forEach((r) => names.push(r?.name || ""));
+    (it.notes || []).forEach((n) => names.push(n?.name || ""));
     return names.some((nm) => toKeyName(nm).includes(q));
   });
 }
 
-// ---------- Backend ----------
 async function apiRequest(action, payload) {
   if (!APP_SCRIPT_URL) throw new Error("APP_SCRIPT_URL is not set");
+
   const res = await fetch(APP_SCRIPT_URL, {
     method: "POST",
     body: JSON.stringify({ action, payload }),
@@ -146,8 +124,7 @@ async function apiRequest(action, payload) {
 async function loadAllAudits() {
   if (APP_SCRIPT_URL) {
     const data = await apiRequest("list", {});
-    const items = Array.isArray(data.items) ? data.items : [];
-    return migrateItems_(items);
+    return migrateItems_(Array.isArray(data.items) ? data.items : []);
   }
   return migrateItems_(JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"));
 }
@@ -160,18 +137,13 @@ async function saveAllAudits(items) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
 }
 
-/**
- * MIGRATION:
- * - Old reaudits: ["2026-01"] => [{name:"", yyyymm:"2026-01"}]
- * - Old notes: {user,text,yyyymm} => {name:user, yyyymm, note:text}
- * - fileLink default ""
- */
 function migrateItems_(items) {
   return (items || []).map((it) => {
     const out = { ...it };
-    if (out.fileLink === undefined) out.fileLink = "";
 
-    // reaudits migrate
+    if (out.fileLink === undefined) out.fileLink = "";
+    if (out.posterLink === undefined) out.posterLink = "";
+
     if (Array.isArray(out.reaudits)) {
       if (out.reaudits.length && typeof out.reaudits[0] === "string") {
         out.reaudits = out.reaudits.map((m) => ({ name: "", yyyymm: String(m || "") }));
@@ -185,7 +157,6 @@ function migrateItems_(items) {
       out.reaudits = [];
     }
 
-    // notes migrate
     if (Array.isArray(out.notes)) {
       if (out.notes.length && out.notes[0] && out.notes[0].user !== undefined) {
         out.notes = out.notes.map((n) => ({
@@ -195,9 +166,9 @@ function migrateItems_(items) {
         }));
       } else {
         out.notes = out.notes.map((n) => ({
-          name: String(n?.name || n?.user || ""),
+          name: String(n?.name || ""),
           yyyymm: String(n?.yyyymm || ""),
-          note: String(n?.note || n?.text || ""),
+          note: String(n?.note || ""),
         }));
       }
     } else {
@@ -209,10 +180,6 @@ function migrateItems_(items) {
   });
 }
 
-/**
- * SAFE UPDATE:
- * always fetch latest, mutate, then save
- */
 async function updateAuditOnServer(auditId, mutatorFn) {
   const latest = await loadAllAudits();
   const idx = latest.findIndex((a) => String(a.id) === String(auditId));
@@ -221,18 +188,18 @@ async function updateAuditOnServer(auditId, mutatorFn) {
   latest[idx].reaudits = Array.isArray(latest[idx].reaudits) ? latest[idx].reaudits : [];
   latest[idx].notes = Array.isArray(latest[idx].notes) ? latest[idx].notes : [];
   if (latest[idx].fileLink === undefined) latest[idx].fileLink = "";
+  if (latest[idx].posterLink === undefined) latest[idx].posterLink = "";
 
   mutatorFn(latest[idx]);
 
   await saveAllAudits(latest);
-
   STATE.items = latest;
   renderAll();
 }
 
-// ---------- Statistics ----------
 function computeAuditorStats(items) {
-  const counts = new Map(); // auditorName -> count
+  const counts = new Map();
+
   (items || []).forEach((it) => {
     (it.reaudits || []).forEach((r) => {
       const nm = String(r?.name || "").trim();
@@ -247,10 +214,8 @@ function computeAuditorStats(items) {
   return { top, list };
 }
 
-// ---------- UI helpers ----------
 function ensureEnhancementsUI() {
-  // Create a search box + stats panel if not exists
-  const host = document.querySelector(".container") || document.body;
+  const host = document.querySelector(".panel .table-wrap") || document.body;
 
   if (!document.getElementById("auditorFilterBox")) {
     const box = document.createElement("div");
@@ -291,12 +256,9 @@ function ensureEnhancementsUI() {
     });
     box.appendChild(clearBtn);
 
-    // insert before table if possible
     const table = document.getElementById("auditsTable");
     if (table && table.parentElement) {
       table.parentElement.insertBefore(box, table);
-    } else {
-      host.prepend(box);
     }
   }
 
@@ -309,12 +271,9 @@ function ensureEnhancementsUI() {
     panel.style.borderRadius = "12px";
     panel.style.background = "#fff";
 
-    // insert above table
     const table = document.getElementById("auditsTable");
     if (table && table.parentElement) {
       table.parentElement.insertBefore(panel, table);
-    } else {
-      host.prepend(panel);
     }
   }
 }
@@ -347,7 +306,6 @@ function renderAuditorStats(items) {
   `;
 }
 
-// ---------- UI ----------
 function renderYearCards() {
   const container = document.getElementById("yearCards");
   if (!container) return;
@@ -371,6 +329,7 @@ function renderYearCards() {
 
   const years = getYearList(STATE.items);
   const byYear = new Map(stats.map((s) => [s.year, s]));
+
   years.forEach((y) => {
     const s = byYear.get(y) || { year: y, count: 0, reaudits: 0, notes: 0 };
     const card = document.createElement("div");
@@ -415,6 +374,7 @@ function renderTable(items) {
     <tr>
       <th>Clinical Audit Name</th>
       <th>File</th>
+      <th>Poster</th>
       <th>Year</th>
       <th>Start (MM/YYYY)</th>
       <th>Auditor Name</th>
@@ -426,25 +386,22 @@ function renderTable(items) {
   sorted.forEach((audit) => {
     const tr = document.createElement("tr");
 
-    // Name
     const tdName = document.createElement("td");
     tdName.textContent = audit.name || "";
     tr.appendChild(tdName);
 
-    // File
     const tdFile = document.createElement("td");
-    const link = String(audit.fileLink || "").trim();
-
-    if (link) {
+    const fileLink = String(audit.fileLink || "").trim();
+    if (fileLink) {
       const openA = document.createElement("a");
-      openA.href = link;
+      openA.href = fileLink;
       openA.target = "_blank";
       openA.rel = "noopener noreferrer";
       openA.textContent = "Open";
       tdFile.appendChild(openA);
 
       const dl = document.createElement("a");
-      dl.href = buildDownloadUrl(link);
+      dl.href = buildDownloadUrl(fileLink);
       dl.target = "_blank";
       dl.rel = "noopener noreferrer";
       dl.textContent = "Download";
@@ -463,7 +420,7 @@ function renderTable(items) {
       inp.placeholder = "Paste file link...";
       inp.className = "file-link";
       inp.dataset.id = audit.id;
-      inp.value = link;
+      inp.value = fileLink;
       ctrls.appendChild(inp);
 
       const btn = document.createElement("button");
@@ -478,24 +435,58 @@ function renderTable(items) {
 
     tr.appendChild(tdFile);
 
-    // Year
+    const tdPoster = document.createElement("td");
+    const posterLink = String(audit.posterLink || "").trim();
+    if (posterLink) {
+      const openP = document.createElement("a");
+      openP.href = posterLink;
+      openP.target = "_blank";
+      openP.rel = "noopener noreferrer";
+      openP.textContent = "View Poster";
+      tdPoster.appendChild(openP);
+    } else {
+      tdPoster.textContent = "-";
+    }
+
+    if (!isView) {
+      const ctrls = document.createElement("div");
+      ctrls.className = "inline-controls";
+
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.placeholder = "Paste poster link...";
+      inp.className = "poster-link";
+      inp.dataset.id = audit.id;
+      inp.value = posterLink;
+      ctrls.appendChild(inp);
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn secondary btn-save-poster";
+      btn.dataset.id = audit.id;
+      btn.textContent = "Save";
+      ctrls.appendChild(btn);
+
+      tdPoster.appendChild(ctrls);
+    }
+
+    tr.appendChild(tdPoster);
+
     const tdYear = document.createElement("td");
     tdYear.textContent = audit.year || "";
     tr.appendChild(tdYear);
 
-    // Start
     const tdStart = document.createElement("td");
     tdStart.textContent = monthToLabel(audit.startYYYYMM || "");
     tr.appendChild(tdStart);
 
-    // Auditor Name (show name only - no date)
     const tdAud = document.createElement("td");
     const list = document.createElement("ul");
     list.className = "reaudit-list";
     (audit.reaudits || []).forEach((r) => {
       const li = document.createElement("li");
       const nm = String(r?.name || "").trim();
-      li.textContent = nm || "-"; // ✅ no date shown
+      li.textContent = nm || "-";
       list.appendChild(li);
     });
     tdAud.appendChild(list);
@@ -529,7 +520,6 @@ function renderTable(items) {
 
     tr.appendChild(tdAud);
 
-    // Re-Auditor Name & Date (name + date + optional note)
     const tdNotes = document.createElement("td");
     const notesDiv = document.createElement("div");
     notesDiv.className = "notes";
@@ -613,7 +603,6 @@ function renderTable(items) {
 
     tr.appendChild(tdNotes);
 
-    // Actions
     if (!isView) {
       const tdAct = document.createElement("td");
 
@@ -659,7 +648,6 @@ function renderAll() {
   renderTable(filtered);
 }
 
-// ---------- Actions ----------
 async function refresh() {
   try {
     STATE.items = await loadAllAudits();
@@ -673,8 +661,9 @@ async function onSaveNewAudit() {
   try {
     const year = (document.getElementById("yearSelect")?.value || "").trim();
     const name = (document.getElementById("auditName")?.value || "").trim();
-    const startYYYYMM = (document.getElementById("startMonth")?.value || "").trim();
     const fileLink = normalizeUrl((document.getElementById("fileLink")?.value || "").trim());
+    const posterLink = normalizeUrl((document.getElementById("posterLink")?.value || "").trim());
+    const startYYYYMM = (document.getElementById("startMonth")?.value || "").trim();
 
     if (!year || !/^\d{4}$/.test(year) || !name) {
       alert("Please enter a valid Year (YYYY) and Audit Name.");
@@ -691,6 +680,7 @@ async function onSaveNewAudit() {
       year,
       name,
       fileLink: fileLink || "",
+      posterLink: posterLink || "",
       startYYYYMM,
       reaudits: [],
       notes: [],
@@ -699,9 +689,10 @@ async function onSaveNewAudit() {
     await saveAllAudits(latest);
     STATE.items = latest;
 
-    if (document.getElementById("auditName")) document.getElementById("auditName").value = "";
-    if (document.getElementById("startMonth")) document.getElementById("startMonth").value = "";
-    if (document.getElementById("fileLink")) document.getElementById("fileLink").value = "";
+    document.getElementById("auditName") && (document.getElementById("auditName").value = "");
+    document.getElementById("fileLink") && (document.getElementById("fileLink").value = "");
+    document.getElementById("posterLink") && (document.getElementById("posterLink").value = "");
+    document.getElementById("startMonth") && (document.getElementById("startMonth").value = "");
 
     renderAll();
     alert("Saved successfully!");
@@ -720,6 +711,19 @@ async function saveFileLink(id) {
     });
   } catch (e) {
     alert(`Save link failed: ${e.message || e}`);
+  }
+}
+
+async function savePosterLink(id) {
+  try {
+    const inp = document.querySelector(`.poster-link[data-id="${id}"]`);
+    const link = normalizeUrl((inp?.value || "").trim());
+
+    await updateAuditOnServer(id, (audit) => {
+      audit.posterLink = link || "";
+    });
+  } catch (e) {
+    alert(`Save poster failed: ${e.message || e}`);
   }
 }
 
@@ -756,7 +760,7 @@ async function addNote(id) {
 
     const nm = (nameInp?.value || "").trim();
     const yyyymm = (monthInp?.value || "").trim();
-    const note = (noteInp?.value || "").trim(); // optional
+    const note = (noteInp?.value || "").trim();
 
     if (!nm) {
       alert("Please enter Re-auditor name.");
@@ -842,9 +846,13 @@ async function editAudit(id) {
     if (newStart === null) return;
     const startYYYYMM = newStart.trim();
 
-    const newLink = prompt("Edit File Link (optional):", auditLocal.fileLink || "");
-    if (newLink === null) return;
-    const fileLink = normalizeUrl(newLink.trim());
+    const newFile = prompt("Edit File Link (optional):", auditLocal.fileLink || "");
+    if (newFile === null) return;
+    const fileLink = normalizeUrl(newFile.trim());
+
+    const newPoster = prompt("Edit Poster Link (optional):", auditLocal.posterLink || "");
+    if (newPoster === null) return;
+    const posterLink = normalizeUrl(newPoster.trim());
 
     if (!year || !/^\d{4}$/.test(year) || !name) {
       alert("Invalid Year/Name.");
@@ -863,6 +871,7 @@ async function editAudit(id) {
     latest[idx].name = name;
     latest[idx].startYYYYMM = startYYYYMM;
     latest[idx].fileLink = fileLink || "";
+    latest[idx].posterLink = posterLink || "";
 
     await saveAllAudits(latest);
     STATE.items = latest;
@@ -887,7 +896,6 @@ async function deleteAudit(id) {
   }
 }
 
-// ---------- Export ----------
 function exportJSON() {
   const items = filterByAuditor(filterByYear(STATE.items));
   const blob = new Blob([JSON.stringify(items, null, 2)], { type: "application/json" });
@@ -904,7 +912,7 @@ function exportToCSV() {
     return;
   }
 
-  let csv = "ID,Year,AuditName,FileLink,Start(YYYY-MM),Auditors,ReAuditorEntries\n";
+  let csv = "ID,Year,AuditName,FileLink,PosterLink,Start(YYYY-MM),Auditors,ReAuditorEntries\n";
 
   items.forEach((row) => {
     const auditors = (row.reaudits || [])
@@ -920,12 +928,11 @@ function exportToCSV() {
       row.year || "",
       (row.name || "").replaceAll('"', '""'),
       (row.fileLink || "").replaceAll('"', '""'),
+      (row.posterLink || "").replaceAll('"', '""'),
       row.startYYYYMM || "",
       auditors.replaceAll('"', '""'),
       entries.replaceAll('"', '""'),
-    ]
-      .map((v) => `"${String(v)}"`)
-      .join(",");
+    ].map((v) => `"${String(v)}"`).join(",");
 
     csv += line + "\n";
   });
@@ -937,7 +944,6 @@ function exportToCSV() {
   link.click();
 }
 
-// ---------- Boot ----------
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("saveBtn")?.addEventListener("click", onSaveNewAudit);
   document.getElementById("btnRefresh")?.addEventListener("click", refresh);
@@ -958,6 +964,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (t.classList.contains("btn-save-link")) {
       saveFileLink(t.dataset.id);
+    } else if (t.classList.contains("btn-save-poster")) {
+      savePosterLink(t.dataset.id);
     } else if (t.classList.contains("btn-add-reaudit")) {
       addReAudit(t.dataset.id);
     } else if (t.classList.contains("btn-add-note")) {
